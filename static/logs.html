@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>请求日志 - Claude Catche</title>
+<link rel="stylesheet" href="/static/common.css?v=1">
+<style>
+.container{max-width:920px;}
+h2{display:inline-flex;align-items:center;gap:10px;}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;}
+.status-ok{color:#5fb98e;font-weight:600;}
+.status-err{color:#d77;font-weight:600;}
+
+.fail-card{background:rgba(231,140,140,0.06);border:1px solid rgba(231,140,140,0.25);}
+.fail-item{border-bottom:1px dashed var(--border);padding:10px 0;font-size:12px;}
+.fail-item pre{background:var(--input-bg);border-radius:8px;padding:8px;overflow-x:auto;margin-top:6px;font-size:11px;max-height:160px;}
+</style>
+</head>
+<body>
+<script src="/static/theme.js?v=1"></script>
+<div class="topbar">
+    <div class="brand"><span class="logo brand-logo"></span><span class="b">Claude</span> <span class="p">Catche</span></div>
+    <div class="topbar-right">
+        <button class="theme-btn" onclick="toggleTheme()"></button>
+        <a href="/dashboard">返回</a>
+    </div>
+</div>
+<div class="container">
+    <h2><span id="ic-logs"></span>请求日志</h2>
+
+    <div class="filter-row">
+        <select id="channelFilter" onchange="load()"><option value="">全部渠道</option></select>
+        <button class="btn btn-blue btn-sm" onclick="load()">刷新</button>
+    </div>
+
+    <div class="card">
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>时间</th><th>渠道</th><th>模型</th><th>输入</th><th>输出</th><th>缓存写/读</th><th>耗时</th><th>状态</th></tr></thead>
+                <tbody id="tbody"></tbody>
+            </table>
+            <div class="empty" id="empty" style="display:none;">暂无日志</div>
+        </div>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:24px 0 12px;">
+        <div class="section-label" style="margin:0;">最近失败请求</div>
+        <button class="btn btn-outline-pink btn-sm" onclick="clearFail()">清空</button>
+    </div>
+    <div class="card fail-card">
+        <div id="failBox"><div class="empty">暂无失败记录</div></div>
+    </div>
+</div>
+<script src="/static/app.js?v=1"></script>
+<script src="/static/icons.js?v=1"></script>
+<script>
+document.getElementById('ic-logs').innerHTML = ICONS.logs;
+
+function fmtTime(ts){
+    if(!ts) return '-';
+    const d = new Date((ts < 2e10 ? ts*1000 : ts) + 8*3600000);
+    const pad = n => String(n).padStart(2,'0');
+    return pad(d.getUTCMonth()+1)+'-'+pad(d.getUTCDate())+' '+pad(d.getUTCHours())+':'+pad(d.getUTCMinutes())+':'+pad(d.getUTCSeconds());
+}
+
+async function loadChannels(){
+    try{
+        const list = await apiJson('/api/channels');
+        const sel = document.getElementById('channelFilter');
+        list.forEach(c => {
+            const o = document.createElement('option');
+            o.value = c.id; o.textContent = c.name;
+            sel.appendChild(o);
+        });
+    }catch(e){}
+}
+
+async function load(){
+    const cid = document.getElementById('channelFilter').value;
+    const url = '/api/logs?limit=100' + (cid ? '&channel_id='+cid : '');
+    const list = await apiJson(url);
+    const tb = document.getElementById('tbody');
+    tb.innerHTML = '';
+    document.getElementById('empty').style.display = list.length ? 'none' : 'block';
+    list.forEach(r => {
+        const tr = document.createElement('tr');
+        const ok = r.status < 400;
+        tr.innerHTML =
+            '<td class="mono" style="font-size:12px;">'+fmtTime(r.request_at)+'</td>'+
+            '<td>'+escapeHtml(r.channel_name||'-')+'</td>'+
+            '<td class="mono" style="font-size:12px;">'+escapeHtml(r.model||'-')+'</td>'+
+            '<td>'+fmt(r.input_tokens)+'</td>'+
+            '<td>'+fmt(r.output_tokens)+'</td>'+
+            '<td>'+fmt(r.cache_creation_tokens)+' / '+fmt(r.cache_read_tokens)+'</td>'+
+            '<td>'+(r.duration_ms||0)+'ms</td>'+
+            '<td class="'+(ok?'status-ok':'status-err')+'">'+r.status+'</td>';
+        tb.appendChild(tr);
+    });
+    loadFailures();
+}
+
+async function loadFailures(){
+    const box = document.getElementById('failBox');
+    try{
+        const list = await apiJson('/api/failures');
+        if(!list.length){ box.innerHTML = '<div class="empty">暂无失败记录</div>'; return; }
+        box.innerHTML = '';
+        list.forEach(f => {
+            const div = document.createElement('div');
+            div.className = 'fail-item';
+            const head = '['+fmtTime(f.ts)+'] 渠道 '+escapeHtml(f.channel||'-')+
+                ' · '+(f.streaming?'流式':'非流式')+
+                (f.upstream_status?(' · HTTP '+f.upstream_status):'')+
+                (f.error_type?(' · '+escapeHtml(f.error_type)):'');
+            const detail = f.upstream_body || f.error_repr || '';
+            div.innerHTML = '<b>'+head+'</b>'+(detail?('<pre>'+escapeHtml(detail)+'</pre>'):'');
+            box.appendChild(div);
+        });
+    }catch(e){ box.innerHTML = '<div class="empty">加载失败</div>'; }
+}
+
+async function clearFail(){
+    await api('/api/failures', {method:'DELETE'});
+    loadFailures();
+}
+
+loadChannels();
+load();
+</script>
+</body>
+</html>

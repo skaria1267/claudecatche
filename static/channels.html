@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>渠道管理 - Claude Catche</title>
+<link rel="stylesheet" href="/static/common.css?v=1">
+<style>
+h2{display:inline-flex;align-items:center;gap:10px;}
+
+.act-btn{
+    background:var(--blue-bg);color:var(--blue);border:none;
+    padding:5px 12px;border-radius:8px;font-size:11px;cursor:pointer;
+    font-weight:600;margin-right:6px;transition:all .15s;
+    font-family:inherit;line-height:1.4;
+}
+.act-btn:hover{opacity:0.85;transform:translateY(-1px);}
+.act-btn.warn{background:rgba(255,217,125,0.20);color:#c99820;}
+.act-btn.danger{background:rgba(231,140,140,0.18);color:#d77;}
+.act-btn.mint{background:rgba(143,217,182,0.20);color:#5fb98e;}
+
+.url-cell{font-size:12px;color:var(--text3);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;}
+
+/* 缓存模式卡片 */
+.mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:8px 0 12px;}
+.mode-card{
+    padding:12px;border-radius:12px;border:2px solid var(--border2);cursor:pointer;
+    transition:all .2s;background:var(--input-bg);position:relative;
+}
+.mode-card:hover{border-color:var(--blue-border);background:var(--blue-bg);}
+.mode-card.active{border-color:var(--blue);background:var(--blue-bg);box-shadow:0 0 0 3px rgba(91,184,212,0.12);}
+.mode-card .mode-icon{height:24px;margin-bottom:6px;display:flex;align-items:center;}
+.mode-card .mode-name{font-size:13px;font-weight:700;color:var(--text2);margin-bottom:2px;}
+.mode-card .mode-desc{font-size:10.5px;color:var(--text4);line-height:1.4;}
+.mode-card.active .mode-name{color:var(--blue);}
+.mode-card.active::after{
+    content:'';position:absolute;top:8px;right:8px;width:8px;height:8px;
+    border-radius:50%;background:var(--blue);
+}
+
+.sub-panel{
+    display:none;padding:14px;background:var(--input-bg);border-radius:12px;
+    border:1px dashed var(--border2);margin-top:6px;
+}
+.sub-panel.active{display:block;}
+.sub-panel label{font-size:12px;color:var(--text3);font-weight:600;display:block;margin-bottom:6px;}
+
+.rule-row{
+    display:flex;gap:8px;align-items:center;margin-bottom:8px;
+    padding:10px 12px;background:var(--bg2);border-radius:10px;border:1px solid var(--border2);
+}
+.rule-row select,.rule-row input{
+    padding:7px 10px;border:1.5px solid var(--border2);border-radius:8px;
+    font-size:12px;outline:none;background:var(--input-bg);color:var(--text);font-family:inherit;
+}
+.rule-row select:focus,.rule-row input:focus{border-color:var(--blue);}
+.rule-row select{width:auto;}
+.rule-row input[type=number]{width:60px;text-align:center;}
+.rule-del{
+    width:28px;height:28px;border-radius:8px;border:none;background:rgba(231,140,140,0.15);
+    color:#e74c3c;cursor:pointer;font-size:14px;display:flex;align-items:center;
+    justify-content:center;transition:all .15s;flex-shrink:0;
+}
+.rule-del:hover{background:#e74c3c;color:#fff;}
+.rule-hint{font-size:11px;color:var(--text4);margin-top:6px;}
+.btn-outline{background:var(--bg2);border:1.5px solid var(--border2);color:var(--text3);}
+.btn-outline:hover{border-color:var(--blue);color:var(--blue);}
+
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+
+.toast{
+    position:fixed;top:20px;right:20px;background:linear-gradient(135deg,var(--blue),#4AA8C4);
+    color:#fff;padding:12px 24px;border-radius:12px;font-size:13px;font-weight:600;
+    display:none;z-index:999;box-shadow:0 4px 20px rgba(91,184,212,0.3);
+}
+@media(max-width:500px){.grid2,.mode-grid{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+<script src="/static/theme.js?v=1"></script>
+<div class="topbar">
+    <div class="brand"><span class="logo brand-logo"></span><span class="b">Claude</span> <span class="p">Catche</span></div>
+    <div class="topbar-right">
+        <button class="theme-btn" onclick="toggleTheme()"></button>
+        <a href="/dashboard">返回</a>
+    </div>
+</div>
+<div class="container">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px;">
+        <h2 style="margin:0;"><span id="ic-plug"></span>渠道管理</h2>
+        <button class="btn btn-blue" onclick="openAdd()">+ 添加渠道</button>
+    </div>
+    <div class="card">
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>渠道名</th><th>上游 URL</th><th>认证</th><th>缓存</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody id="tbody"></tbody>
+            </table>
+            <div class="empty" id="empty" style="display:none;">还没有渠道，点击上方添加</div>
+        </div>
+    </div>
+</div>
+
+<!-- ============ 添加/编辑渠道弹窗 ============ -->
+<div class="modal-overlay" id="modal">
+    <div class="modal">
+        <h3 id="modalTitle">添加渠道</h3>
+        <input type="hidden" id="f-id">
+
+        <div class="form-group">
+            <label>渠道名（路由用，仅字母/数字/下划线/连字符）</label>
+            <input type="text" id="f-name" placeholder="例如 openrouter">
+        </div>
+        <div class="form-group">
+            <label>上游 URL（中转站地址，自动补全 /v1/messages）</label>
+            <input type="text" id="f-url" placeholder="https://example.com 或 https://example.com/v1">
+        </div>
+        <div class="form-group">
+            <label>渠道 Key（该渠道上游真实 API Key）</label>
+            <input type="text" id="f-key" placeholder="sk-...">
+        </div>
+        <div class="grid2">
+            <div class="form-group">
+                <label>认证头模式</label>
+                <select id="f-auth">
+                    <option value="both">x-api-key 和 Authorization 都带</option>
+                    <option value="x">仅 x-api-key</option>
+                    <option value="a">仅 Authorization Bearer</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>启用状态</label>
+                <select id="f-active">
+                    <option value="1">启用</option>
+                    <option value="0">停用</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-group">
+            <label>支持的模型名（可选，逗号分隔，仅作展示记录）</label>
+            <input type="text" id="f-models" placeholder="claude-opus-4, claude-sonnet-4">
+        </div>
+
+        <div class="section-label" style="margin:18px 0 10px;">缓存断点配置</div>
+
+        <div class="grid2">
+            <div class="form-group">
+                <label>是否启用缓存注入</label>
+                <select id="f-cache-enabled">
+                    <option value="1">开启</option>
+                    <option value="0">关闭</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>缓存 TTL</label>
+                <select id="f-cache-ttl">
+                    <option value="5m">5 分钟（默认）</option>
+                    <option value="1h">1 小时</option>
+                </select>
+            </div>
+        </div>
+
+        <label style="font-size:13px;color:var(--text3);">打标模式</label>
+        <div class="mode-grid" id="modeGrid">
+            <div class="mode-card" data-mode="auto" onclick="selectMode('auto')">
+                <div class="mode-icon" id="mi-auto"></div>
+                <div class="mode-name">自动模式</div>
+                <div class="mode-desc">顶层 cache_control，由 API 自动管理断点</div>
+            </div>
+            <div class="mode-card" data-mode="rules" onclick="selectMode('rules')">
+                <div class="mode-icon" id="mi-slider"></div>
+                <div class="mode-name">自定义断点</div>
+                <div class="mode-desc">最多 4 条规则，精确控制断点位置</div>
+            </div>
+        </div>
+
+        <div class="sub-panel" id="panel-rules">
+            <label>打标规则（最多 4 条）</label>
+            <div id="rulesContainer"></div>
+            <button class="btn btn-outline btn-sm" id="addRuleBtn" onclick="addRule()" style="margin-top:8px;">+ 添加规则</button>
+            <div class="rule-hint">每条规则指定一个断点位置，system 目标会在系统消息上打标</div>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn btn-outline-pink" onclick="hideModal('modal')">取消</button>
+            <button class="btn btn-blue" onclick="save()">保存</button>
+        </div>
+    </div>
+</div>
+
+<div class="toast" id="toast">已保存</div>
+
+<script src="/static/app.js?v=1"></script>
+<script src="/static/icons.js?v=1"></script>
+<script>
+document.getElementById('ic-plug').innerHTML = ICONS.plug;
+document.getElementById('mi-auto').innerHTML = ICONS.auto;
+document.getElementById('mi-slider').innerHTML = ICONS.slider;
+
+const AUTH_LABEL = {x:'仅 x-api-key', a:'仅 Authorization', both:'x + a'};
+let currentMode = 'auto';
+let rules = [];
+
+function selectMode(mode){
+    if(mode !== 'auto' && mode !== 'rules') mode = 'auto';
+    currentMode = mode;
+    document.querySelectorAll('.mode-card').forEach(c => c.classList.toggle('active', c.dataset.mode === mode));
+    document.getElementById('panel-rules').classList.toggle('active', mode === 'rules');
+}
+
+function renderRules(){
+    const container = document.getElementById('rulesContainer');
+    container.innerHTML = '';
+    rules.forEach((r, i) => {
+        const div = document.createElement('div');
+        div.className = 'rule-row';
+        div.innerHTML = `
+            <select onchange="rules[${i}].target=this.value">
+                <option value="system" ${r.target==='system'?'selected':''}>system</option>
+                <option value="messages" ${r.target==='messages'?'selected':''}>messages</option>
+            </select>
+            <select onchange="rules[${i}].direction=this.value">
+                <option value="forward" ${r.direction==='forward'?'selected':''}>正数第</option>
+                <option value="backward" ${r.direction==='backward'?'selected':''}>倒数第</option>
+            </select>
+            <input type="number" value="${r.index}" min="1" max="999" onchange="rules[${i}].index=parseInt(this.value)||1">
+            <span style="font-size:12px;color:var(--text3);">条</span>
+            <button class="rule-del" onclick="removeRule(${i})">x</button>
+        `;
+        container.appendChild(div);
+    });
+    document.getElementById('addRuleBtn').style.display = rules.length>=4 ? 'none' : 'inline-block';
+}
+function addRule(){ if(rules.length>=4) return; rules.push({target:'messages', direction:'backward', index:2}); renderRules(); }
+function removeRule(i){ rules.splice(i, 1); renderRules(); }
+
+function openAdd(){
+    document.getElementById('modalTitle').textContent = '添加渠道';
+    document.getElementById('f-id').value = '';
+    document.getElementById('f-name').value = '';
+    document.getElementById('f-url').value = '';
+    document.getElementById('f-key').value = '';
+    document.getElementById('f-auth').value = 'both';
+    document.getElementById('f-active').value = '1';
+    document.getElementById('f-models').value = '';
+    document.getElementById('f-cache-enabled').value = '1';
+    document.getElementById('f-cache-ttl').value = '5m';
+    rules = [];
+    renderRules();
+    selectMode('auto');
+    document.getElementById('f-name').disabled = false;
+    showModal('modal');
+}
+
+async function openEdit(id){
+    const c = await apiJson('/api/channels/'+id);
+    document.getElementById('modalTitle').textContent = '编辑渠道';
+    document.getElementById('f-id').value = c.id;
+    document.getElementById('f-name').value = c.name;
+    document.getElementById('f-url').value = c.base_url;
+    document.getElementById('f-key').value = c.api_key;
+    document.getElementById('f-auth').value = c.auth_mode || 'both';
+    document.getElementById('f-active').value = String(c.is_active);
+    document.getElementById('f-models').value = c.models || '';
+    document.getElementById('f-cache-enabled').value = String(c.cache_enabled);
+    document.getElementById('f-cache-ttl').value = c.cache_ttl || '5m';
+    try{ rules = JSON.parse(c.cache_rules || '[]'); }catch(e){ rules = []; }
+    renderRules();
+    selectMode(c.cache_mode || 'auto');
+    showModal('modal');
+}
+
+async function save(){
+    const id = document.getElementById('f-id').value;
+    const payload = {
+        name: document.getElementById('f-name').value.trim(),
+        base_url: document.getElementById('f-url').value.trim(),
+        api_key: document.getElementById('f-key').value.trim(),
+        auth_mode: document.getElementById('f-auth').value,
+        is_active: parseInt(document.getElementById('f-active').value),
+        models: document.getElementById('f-models').value.trim(),
+        cache_enabled: parseInt(document.getElementById('f-cache-enabled').value),
+        cache_ttl: document.getElementById('f-cache-ttl').value,
+        cache_mode: currentMode,
+        cache_rules: JSON.stringify(currentMode === 'rules' ? rules : []),
+    };
+    if(!payload.name){ alert('请填写渠道名'); return; }
+    if(!payload.base_url){ alert('请填写上游 URL'); return; }
+    if(!payload.api_key){ alert('请填写渠道 Key'); return; }
+
+    try{
+        let r;
+        if(id){ r = await api('/api/channels/'+id, {method:'PATCH', body:JSON.stringify(payload)}); }
+        else  { r = await api('/api/channels', {method:'POST', body:JSON.stringify(payload)}); }
+        if(!r.ok){ const e = await r.json().catch(()=>({})); alert('保存失败：'+(e.detail||r.status)); return; }
+        hideModal('modal');
+        showToast(ICONS.check + ' 已保存');
+        load();
+    }catch(e){ alert('保存失败：'+e.message); }
+}
+
+async function del(id, name){
+    if(!confirm('确定删除渠道 '+name+' ？')) return;
+    await api('/api/channels/'+id, {method:'DELETE'});
+    load();
+}
+
+async function toggle(id, cur){
+    await api('/api/channels/'+id, {method:'PATCH', body:JSON.stringify({is_active: cur ? 0 : 1})});
+    load();
+}
+
+async function load(){
+    const list = await apiJson('/api/channels');
+    const tb = document.getElementById('tbody');
+    tb.innerHTML = '';
+    document.getElementById('empty').style.display = list.length ? 'none' : 'block';
+    list.forEach(c => {
+        const tr = document.createElement('tr');
+
+        const tdName = document.createElement('td');
+        tdName.innerHTML = '<span class="mono" style="font-weight:600;">'+escapeHtml(c.name)+'</span>';
+
+        const tdUrl = document.createElement('td');
+        tdUrl.className = 'url-cell mono';
+        tdUrl.title = c.base_url;
+        tdUrl.textContent = c.base_url;
+
+        const tdAuth = document.createElement('td');
+        tdAuth.innerHTML = '<span class="tag tag-blue">'+(AUTH_LABEL[c.auth_mode]||c.auth_mode)+'</span>';
+
+        const tdCache = document.createElement('td');
+        if(c.cache_enabled){
+            const label = c.cache_mode === 'rules' ? '自定义' : '自动';
+            tdCache.innerHTML = '<span class="tag tag-pink">'+label+' · '+c.cache_ttl+'</span>';
+        }else{
+            tdCache.innerHTML = '<span class="tag tag-red">关闭</span>';
+        }
+
+        const tdStatus = document.createElement('td');
+        tdStatus.innerHTML = c.is_active
+            ? '<span class="tag tag-green">启用</span>'
+            : '<span class="tag tag-red">停用</span>';
+
+        const tdAct = document.createElement('td');
+        const bEdit = document.createElement('button'); bEdit.className='act-btn'; bEdit.textContent='编辑';
+        bEdit.addEventListener('click', ()=>openEdit(c.id));
+        const bTog = document.createElement('button'); bTog.className='act-btn warn'; bTog.textContent=c.is_active?'停用':'启用';
+        bTog.addEventListener('click', ()=>toggle(c.id, c.is_active));
+        const bDel = document.createElement('button'); bDel.className='act-btn danger'; bDel.textContent='删除';
+        bDel.addEventListener('click', ()=>del(c.id, c.name));
+        tdAct.append(bEdit, bTog, bDel);
+
+        tr.append(tdName, tdUrl, tdAuth, tdCache, tdStatus, tdAct);
+        tb.appendChild(tr);
+    });
+}
+
+load();
+</script>
+</body>
+</html>

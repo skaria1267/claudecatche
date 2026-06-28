@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录 - Claude Catche</title>
+<style>
+:root{--bg:#fff;--bg2:#FAFBFC;--text:#000;--text3:#999;--border:#e8e8e8;--blue:#5BB8D4;--pink:#FFB7C5;}
+[data-theme="dark"]{--bg:#111;--bg2:#1a1a1a;--text:#e0e0e0;--text3:#666;--border:#333;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center;transition:background .3s,color .3s;}
+.theme-toggle{position:fixed;top:16px;right:16px;cursor:pointer;background:none;border:none;color:var(--text3);}
+.card{width:90%;max-width:380px;text-align:center;}
+.logo{margin-bottom:12px;}
+.card h1{font-size:22px;margin-bottom:4px;}
+.card h1 span.blue{color:var(--blue);}
+.card h1 span.pink{color:var(--pink);}
+.card p{color:var(--text3);font-size:13px;margin-bottom:32px;}
+.input-wrap{position:relative;margin-bottom:20px;}
+.input-wrap input{
+    width:100%;padding:14px 18px;font-size:15px;
+    border:2px solid var(--border);border-radius:12px;outline:none;
+    background:var(--bg2);color:var(--text);transition:all .2s;
+}
+.input-wrap input:focus{border-color:var(--blue);background:var(--bg);}
+.btn{
+    width:100%;padding:14px;font-size:16px;font-weight:600;
+    border:none;border-radius:12px;cursor:pointer;transition:all .2s;font-family:inherit;
+}
+.btn-blue{background:var(--blue);color:#fff;}
+.btn-blue:hover{opacity:0.9;}
+.btn-blue:active{transform:scale(0.98);}
+.footer{color:var(--text3);font-size:11px;margin-top:24px;}
+.err{color:#e74c3c;font-size:13px;margin-top:10px;display:none;}
+</style>
+</head>
+<body>
+<script src="/static/theme.js?v=1"></script>
+<button class="theme-toggle" onclick="toggleTheme()"></button>
+<div class="card">
+    <div class="logo" id="logo-icon" style="width:72px;height:72px;margin:0 auto 12px;"></div>
+    <h1><span class="blue">Claude</span> <span class="pink">Catche</span></h1>
+    <p>多渠道缓存反代管理面板</p>
+    <div class="input-wrap">
+        <input type="password" id="pw" placeholder="输入管理密码" autofocus>
+    </div>
+    <button class="btn btn-blue" onclick="login()">登 录</button>
+    <div class="err" id="err">密码错误</div>
+    <div class="footer">Powered by Claude Catche</div>
+</div>
+<script src="/static/icons.js?v=1"></script>
+<script>
+document.getElementById('logo-icon').innerHTML=ICONS.login;
+document.getElementById('pw').addEventListener('keydown',e=>{if(e.key==='Enter')login();});
+async function login(){
+    const pw=document.getElementById('pw').value;
+    const el=document.getElementById('err');el.style.display='none';
+    try{
+        const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});
+        if(!r.ok){el.style.display='block';return;}
+        localStorage.setItem('token',(await r.json()).token);
+        window.location.href='/dashboard';
+    }catch(e){el.textContent='网络错误';el.style.display='block';}
+}
+if(localStorage.getItem('token'))window.location.href='/dashboard';
+</script>
+</body>
+</html>

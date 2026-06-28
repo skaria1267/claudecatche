@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv
+venv/
+env/
+.env
+proxy.db
+proxy.db-journal
+proxy.db-wal
+proxy.db-shm
+*.log
+.DS_Store
+data/

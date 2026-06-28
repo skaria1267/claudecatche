@@ -1,0 +1,13 @@
+services:
+  claudecatche:
+    image: ghcr.io/skaria1267/claudecatche:latest
+    container_name: claudecatche
+    restart: unless-stopped
+    ports:
+      - "${BIND_HOST:-127.0.0.1}:${HOST_PORT:-29413}:29413"
+    volumes:
+      - ./data:/data
+    environment:
+      DB_PATH: /data/proxy.db
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      ACCESS_KEY: ${ACCESS_KEY:-}

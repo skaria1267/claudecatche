@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>账户设置 - Claude Catche</title>
+<link rel="stylesheet" href="/static/common.css?v=1">
+<style>
+.container{max-width:640px;padding:20px 20px 60px;}
+h2{margin-bottom:14px;display:inline-flex;align-items:center;gap:10px;}
+
+.tabs{display:flex;gap:10px;margin-bottom:18px;border-bottom:1px solid var(--border);padding-bottom:14px;}
+.tab{
+    flex:1;padding:10px 14px;border-radius:12px;cursor:pointer;
+    font-size:13px;font-weight:700;text-align:center;
+    transition:all .25s ease;border:2px solid transparent;user-select:none;
+}
+.tab[data-tab="conn"]{color:var(--blue);background:var(--blue-bg);}
+.tab[data-tab="sec"]{color:#5fb98e;background:rgba(143,217,182,0.18);}
+.tab[data-tab="conn"].active{border-color:var(--blue);box-shadow:0 0 0 3px rgba(91,184,212,0.18);background:rgba(91,184,212,0.14);}
+.tab[data-tab="sec"].active{border-color:#7DCBA8;box-shadow:0 0 0 3px rgba(143,217,182,0.22);background:rgba(143,217,182,0.22);}
+.tab:not(.active):hover{transform:translateY(-1px);opacity:0.9;}
+
+.panel{display:none;}
+.panel.active{display:block;}
+
+.card{padding:22px;box-shadow:0 1px 8px rgba(0,0,0,0.04);margin-bottom:14px;border-radius:16px;}
+.card h3{font-size:14px;color:var(--text2);margin-bottom:2px;font-weight:700;}
+.card .desc{font-size:11.5px;color:var(--text4);margin-bottom:14px;line-height:1.6;}
+
+.setting-row{display:flex;gap:10px;align-items:center;}
+.setting-row input{
+    flex:1;padding:11px 14px;border:2px solid var(--border2);border-radius:10px;
+    font-size:13px;outline:none;background:var(--input-bg);color:var(--text);font-family:inherit;
+}
+.setting-row input:focus{border-color:var(--blue);background:var(--bg2);}
+.btn{padding:10px 18px;font-size:13px;}
+.btn-sm{padding:7px 14px;font-size:12px;}
+
+.usage-hint{background:var(--input-bg);border:1px dashed var(--border2);border-radius:12px;padding:14px;font-size:12px;color:var(--text3);line-height:1.8;margin-top:8px;}
+.usage-hint code{font-family:ui-monospace,Menlo,Consolas,monospace;color:var(--blue);background:var(--blue-bg);padding:2px 6px;border-radius:6px;}
+
+.toast{
+    position:fixed;top:20px;right:20px;background:linear-gradient(135deg,var(--blue),#4AA8C4);
+    color:#fff;padding:12px 24px;border-radius:12px;font-size:13px;font-weight:600;
+    display:none;z-index:999;box-shadow:0 4px 20px rgba(91,184,212,0.3);
+}
+</style>
+</head>
+<body>
+<script src="/static/theme.js?v=1"></script>
+<div class="topbar">
+    <div class="brand"><span class="logo brand-logo"></span><span class="b">Claude</span> <span class="p">Catche</span></div>
+    <div class="topbar-right">
+        <button class="theme-btn" onclick="toggleTheme()"></button>
+        <a href="/dashboard">返回</a>
+    </div>
+</div>
+<div class="container">
+    <h2><span id="ic-gear"></span>账户设置</h2>
+
+    <div class="tabs">
+        <div class="tab active" data-tab="conn" onclick="selectTab('conn')">连接</div>
+        <div class="tab" data-tab="sec" onclick="selectTab('sec')">安全</div>
+    </div>
+
+    <div class="panel active" data-panel="conn">
+        <div class="card">
+            <h3>账户访问密钥（Access Key）</h3>
+            <div class="desc">客户端连接本反代时需要的密钥，留空则不校验</div>
+            <div class="setting-row">
+                <input type="text" id="s-key" placeholder="留空不校验">
+                <button class="btn btn-blue btn-sm" onclick="save('access_key','s-key')">保存</button>
+            </div>
+            <div class="usage-hint">
+                客户端（如酒馆）填法和普通 Claude 反代一样：<br>
+                - API URL 填：<code id="url-example">http://你的地址/&lt;渠道名&gt;</code><br>
+                - API Key 填：上面这个<b>访问密钥</b><br>
+                例如渠道名为 <code>openrouter</code> 时，URL 填 <code id="url-example2">http://你的地址/openrouter</code>，
+                Key 填访问密钥即可。反代会自动补 <code>/v1/messages</code>，
+                再用该渠道配置的上游 URL 和渠道 Key 转发出去。
+            </div>
+        </div>
+    </div>
+
+    <div class="panel" data-panel="sec">
+        <div class="card">
+            <h3>管理员密码</h3>
+            <div class="desc">用于登录本管理面板，修改后下次登录生效</div>
+            <div class="setting-row">
+                <input type="password" id="s-pw" placeholder="输入新密码">
+                <button class="btn btn-pink btn-sm" onclick="save('admin_password','s-pw')">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="toast" id="toast">已保存</div>
+<script src="/static/app.js?v=1"></script>
+<script src="/static/icons.js?v=1"></script>
+<script>
+document.getElementById('ic-gear').innerHTML = ICONS.gear;
+
+function selectTab(name){
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+    document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.dataset.panel === name));
+}
+
+async function saveSetting(key, value){
+    return api('/api/settings/'+key, {method:'POST', body:JSON.stringify({value})});
+}
+async function save(key, elId){
+    await saveSetting(key, document.getElementById(elId).value);
+    showToast(ICONS.check + ' 已保存');
+    if(key === 'access_key') updateExample();
+}
+async function loadSetting(key){
+    try{ return (await apiJson('/api/settings/'+key)).value; }catch(e){ return null; }
+}
+function updateExample(){
+    const origin = location.origin;
+    document.getElementById('url-example').textContent = origin + '/<渠道名>';
+    document.getElementById('url-example2').textContent = origin + '/openrouter';
+}
+
+async function load(){
+    const v = await loadSetting('access_key');
+    if(v) document.getElementById('s-key').value = v;
+    updateExample();
+}
+load();
+</script>
+</body>
+</html>

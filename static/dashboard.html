@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>控制台 - Claude Catche</title>
+<link rel="stylesheet" href="/static/common.css?v=1">
+<style>
+.container{max-width:720px;padding:40px 20px;}
+.welcome{text-align:center;margin-bottom:36px;}
+.welcome h2{font-size:24px;color:var(--text2);margin-bottom:6px;}
+.welcome p{color:var(--text3);font-size:14px;}
+
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+.nav-card{
+    border-radius:16px;padding:28px 22px;cursor:pointer;transition:all .2s;
+    text-decoration:none;display:block;position:relative;overflow:hidden;
+    backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+}
+.nav-card:hover{transform:translateY(-3px);}
+.nav-card:active{transform:scale(0.97);}
+.nav-card .icon{width:44px;height:44px;margin-bottom:10px;}
+.nav-card .title{font-size:16px;font-weight:700;margin-bottom:4px;}
+.nav-card .desc{font-size:11.5px;opacity:0.7;}
+
+.card-blue{background:var(--blue-bg);border:2px solid var(--blue-border);color:var(--text);}
+.card-blue .title{color:var(--blue);}
+.card-pink{background:var(--pink-bg);border:2px solid var(--pink-border);color:var(--text);}
+.card-pink .title{color:var(--pink);}
+.card-blue:hover{background:rgba(91,184,212,0.14);box-shadow:0 6px 24px rgba(91,184,212,0.12);}
+.card-pink:hover{background:rgba(255,183,197,0.14);box-shadow:0 6px 24px rgba(255,183,197,0.12);}
+
+.quick-stats{margin-top:28px;}
+.quick-stats h3{font-size:13px;color:var(--text3);margin-bottom:14px;font-weight:600;text-transform:uppercase;letter-spacing:1px;}
+
+@media(max-width:500px){
+    .container{padding:24px 14px;}
+    .nav-card{padding:22px 18px;}
+}
+</style>
+</head>
+<body>
+<script src="/static/theme.js?v=1"></script>
+<div class="topbar">
+    <div class="brand"><span class="logo brand-logo"></span><span class="b">Claude</span> <span class="p">Catche</span></div>
+    <div class="topbar-right">
+        <button class="theme-btn" onclick="toggleTheme()" title="切换主题"></button>
+        <a onclick="logout()">退出</a>
+    </div>
+</div>
+<div class="container">
+    <div class="welcome">
+        <h2>控制台</h2>
+        <p>选择你要管理的功能</p>
+    </div>
+    <div class="grid">
+        <a class="nav-card card-blue" href="/page/channels">
+            <div class="icon" id="icon-channels"></div>
+            <div class="title">渠道管理</div>
+            <div class="desc">添加渠道名、上游 URL、Key 与缓存规则</div>
+        </a>
+        <a class="nav-card card-pink" href="/page/settings">
+            <div class="icon" id="icon-settings"></div>
+            <div class="title">账户设置</div>
+            <div class="desc">访问密钥、管理员密码</div>
+        </a>
+        <a class="nav-card card-pink" href="/page/usage">
+            <div class="icon" id="icon-usage"></div>
+            <div class="title">用量仪表盘</div>
+            <div class="desc">查看 Token 用量与缓存统计</div>
+        </a>
+        <a class="nav-card card-blue" href="/page/logs">
+            <div class="icon" id="icon-logs"></div>
+            <div class="title">请求日志</div>
+            <div class="desc">查看每次请求的详细记录</div>
+        </a>
+    </div>
+    <div class="quick-stats">
+        <h3>快速概览</h3>
+        <div class="stats-grid">
+            <div class="stat-item blue"><div class="num" id="s-input">-</div><div class="lbl">总输入</div></div>
+            <div class="stat-item pink"><div class="num" id="s-output">-</div><div class="lbl">总输出</div></div>
+            <div class="stat-item pink"><div class="num" id="s-cc">-</div><div class="lbl">缓存创建</div></div>
+            <div class="stat-item blue"><div class="num" id="s-cr">-</div><div class="lbl">缓存命中</div></div>
+        </div>
+    </div>
+</div>
+<script src="/static/app.js?v=1"></script>
+<script src="/static/icons.js?v=1"></script>
+<script>
+['channels','settings','usage','logs'].forEach(k=>{
+    document.getElementById('icon-'+k).innerHTML = ICONS[k];
+});
+
+(async function init(){
+    try{
+        const d = await apiJson('/api/usage');
+        const totalInput = (d.total_input||0)+(d.total_cache_creation||0)+(d.total_cache_read||0);
+        document.getElementById('s-input').textContent = fmt(totalInput);
+        document.getElementById('s-output').textContent = fmt(d.total_output);
+        document.getElementById('s-cc').textContent = fmt(d.total_cache_creation);
+        document.getElementById('s-cr').textContent = fmt(d.total_cache_read);
+    }catch(e){}
+})();
+</script>
+</body>
+</html>

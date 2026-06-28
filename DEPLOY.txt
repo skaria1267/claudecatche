@@ -1,0 +1,244 @@
+==========================================================
+ Claude Catche —— VPS 部署指南（小白版，复制粘贴即可）
+==========================================================
+
+这是一个多渠道 Claude API 缓存反向代理。你不需要懂代码，
+跟着下面的步骤，一段一段复制粘贴到 VPS 的终端里回车就行。
+
+镜像仓库：ghcr.io/skaria1267/claudecatche
+代码仓库：https://github.com/skaria1267/claudecatche
+
+----------------------------------------------------------
+ 你需要准备
+----------------------------------------------------------
+- 一台 Linux VPS（Debian 12+ / Ubuntu 22+ 都行），用 root 登录最省事
+- 1 核 1G 内存足够
+- 如果镜像是私有的：仓库主人发给你的 PAT（一串 ghp_xxx...）
+  如果镜像是公开的：不需要 PAT，直接跳过【第二步】
+
+==========================================================
+ 第一步：安装 Docker（已装过就跳过）
+==========================================================
+
+curl -fsSL https://get.docker.com | sh
+
+装完验证（两条都应输出版本号）：
+
+docker --version
+docker compose version
+
+如果 docker compose version 报错说命令不存在：
+
+apt install docker-compose-plugin -y
+
+==========================================================
+ 第二步：登录镜像仓库（镜像是公开的就跳过这步）
+==========================================================
+
+把 <PAT> 换成仓库主人发你的那串 ghp_xxx...：
+
+echo "<PAT>" | docker login ghcr.io -u skaria1267 --password-stdin
+
+期望看到：Login Succeeded
+（可能有一行 WARNING 说凭证未加密，忽略即可）
+
+==========================================================
+ 第三步：建目录
+==========================================================
+
+mkdir -p /opt/claudecatche/data
+cd /opt/claudecatche
+
+==========================================================
+ 第四步：创建 docker-compose.yml
+==========================================================
+
+整块复制粘贴（包含 cat 那行和最后的 EOF 那行）：
+
+cat > /opt/claudecatche/docker-compose.yml <<'EOF'
+services:
+  claudecatche:
+    image: ghcr.io/skaria1267/claudecatche:latest
+    container_name: claudecatche
+    restart: unless-stopped
+    ports:
+      - "${BIND_HOST:-127.0.0.1}:${HOST_PORT:-29413}:29413"
+    volumes:
+      - ./data:/data
+    environment:
+      DB_PATH: /data/proxy.db
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      ACCESS_KEY: ${ACCESS_KEY:-}
+EOF
+
+==========================================================
+ 第五步：选一种网络配置（只选一种）
+==========================================================
+
+------ 情况 A：没有 nginx，想直接用 IP+端口访问 ------
+
+整块复制粘贴：
+
+cat > /opt/claudecatche/.env <<'EOF'
+BIND_HOST=0.0.0.0
+HOST_PORT=29413
+ADMIN_PASSWORD=改成你的强密码
+ACCESS_KEY=改成一个随机字符串
+EOF
+
+提示：ACCESS_KEY 一定要设，否则别人扫到端口+猜到渠道名就能白嫖。
+      没灵感就用这条生成一个随机串：openssl rand -hex 32
+
+放行防火墙端口：
+
+ufw allow 29413/tcp 2>/dev/null || true
+
+（云服务商控制台的「安全组」也要放行同一个端口）
+
+访问方式：
+- 管理面板：http://你的VPS_IP:29413/
+- 客户端 API URL：http://你的VPS_IP:29413/<渠道名>
+  （客户端 Key 栏填「访问密钥 ACCESS_KEY」）
+
+如果 29413 被占用，把上面的 HOST_PORT=29413 改成别的（比如 8080），
+访问地址也跟着改。
+
+------ 情况 B：已有 nginx，想用域名访问 ------
+
+整块复制粘贴：
+
+cat > /opt/claudecatche/.env <<'EOF'
+BIND_HOST=127.0.0.1
+HOST_PORT=29413
+ADMIN_PASSWORD=改成你的强密码
+ACCESS_KEY=改成一个随机字符串
+EOF
+
+给 nginx 加配置（把 你的子域名.example.com 换成你的域名）：
+
+cat > /etc/nginx/conf.d/claudecatche.conf <<'EOF'
+server {
+    listen 80;
+    server_name 你的子域名.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:29413;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+}
+EOF
+
+nginx -t && nginx -s reload
+
+然后去域名 DNS 后台加一条 A 记录指向你的 VPS IP。
+（用 Cloudflare 开橙色云朵可自动 HTTPS）
+
+访问方式：
+- 管理面板：https://你的子域名.example.com/
+- 客户端 API URL：https://你的子域名.example.com/<渠道名>
+  （客户端 Key 栏填「访问密钥 ACCESS_KEY」）
+
+==========================================================
+ 第六步：启动
+==========================================================
+
+cd /opt/claudecatche
+docker compose pull
+docker compose up -d
+
+看日志确认（Ctrl+C 退出查看，不会停容器）：
+
+docker compose logs -f
+
+看到 “Uvicorn running on http://0.0.0.0:29413” 就成功了。
+
+==========================================================
+ 第七步：登录管理面板，配置渠道
+==========================================================
+
+1) 浏览器打开管理面板地址，用第五步设的 ADMIN_PASSWORD 登录。
+
+2) 进「账户设置 → 连接」，确认/修改「访问密钥（Access Key）」。
+   这就是客户端 Key 栏要填的密钥，和 .env 里设的 ACCESS_KEY 一致。
+   （也可以在这里直接改，改完即时生效）
+
+3) 进「渠道管理 → 添加渠道」，填：
+   - 渠道名：路由用，只能字母/数字/下划线/连字符，例如 openrouter
+   - 上游 URL：中转站地址，例如 https://xxx.com 或 https://xxx.com/v1
+               （反代会自动补全 /v1/messages，不用自己加）
+   - 渠道 Key：该中转站给你的真实 API Key
+   - 认证头模式：按中转站要求选（不确定就选「两个都带」）
+   - 缓存：选自动模式，或选「自定义断点」加规则（最多 4 条）
+   保存。
+
+4) 进「安全」标签可随时修改管理员登录密码。
+
+==========================================================
+ 第八步：客户端连接（以 SillyTavern 为例）
+==========================================================
+
+- API 类型：Claude / Anthropic
+- API URL：
+    情况 A：http://你的VPS_IP:29413/<渠道名>
+    情况 B：https://你的子域名.example.com/<渠道名>
+  例如渠道名 openrouter：
+    http://你的VPS_IP:29413/openrouter
+- API Key：填「账户设置」里的访问密钥（ACCESS_KEY）
+
+发一条测试消息，能正常回复就成功了。
+
+==========================================================
+ 日常维护
+==========================================================
+
+# 看日志
+cd /opt/claudecatche && docker compose logs -f
+
+# 重启
+cd /opt/claudecatche && docker compose restart
+
+# 停止
+cd /opt/claudecatche && docker compose down
+
+# 更新到最新版本（仓库主人 push 后 GitHub 会自动构建新镜像）
+cd /opt/claudecatche && docker compose pull && docker compose up -d
+
+# 备份数据（所有数据就在这一个文件里）
+cp /opt/claudecatche/data/proxy.db ~/proxy.db.backup.$(date +%F)
+
+==========================================================
+ 常见问题
+==========================================================
+
+1) 拉镜像报 unauthorized / denied
+   - 镜像若是私有：第二步 docker login 没成功，重做一遍。
+   - 镜像若是公开：在 GitHub 仓库 Packages 里把该包设为 Public。
+
+2) 容器启动后立刻退出
+   docker compose logs --tail 50
+   把报错发给仓库主人。
+
+3) 请求返回 404 “渠道 xxx 不存在”
+   - URL 里的渠道名拼写要和面板里完全一致（区分大小写）。
+
+4) 请求返回 401 “Invalid access key”
+   - 客户端 Key 栏填的访问密钥和「账户设置」里的访问密钥不一致。
+
+5) 请求返回 5xx / 上游报错
+   - 去「请求日志」页底部看「最近失败请求」，里面有上游返回的原文，
+     一般是渠道 URL 写错、Key 失效、或认证头模式选错。
+     认证头模式不确定时改成「两个都带」再试。
+
+==========================================================
+ 性能参考
+==========================================================
+- 内存占用：50-80 MB
+- CPU：几乎为零（只做 HTTP 转发）
+- 最便宜的 1C/1G VPS 完全够用

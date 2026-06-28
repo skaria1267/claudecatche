@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>用量仪表盘 - Claude Catche</title>
+<link rel="stylesheet" href="/static/common.css?v=1">
+<style>
+.container{max-width:720px;}
+h2{display:inline-flex;align-items:center;gap:10px;}
+.stats-grid{grid-template-columns:repeat(2,1fr);}
+.meta-row{display:flex;justify-content:space-between;font-size:13px;padding:8px 0;border-bottom:1px solid var(--border2);color:var(--text3);}
+.meta-row b{color:var(--text2);font-weight:600;}
+@media(min-width:600px){.stats-grid{grid-template-columns:repeat(4,1fr);}}
+</style>
+</head>
+<body>
+<script src="/static/theme.js?v=1"></script>
+<div class="topbar">
+    <div class="brand"><span class="logo brand-logo"></span><span class="b">Claude</span> <span class="p">Catche</span></div>
+    <div class="topbar-right">
+        <button class="theme-btn" onclick="toggleTheme()"></button>
+        <a href="/dashboard">返回</a>
+    </div>
+</div>
+<div class="container">
+    <h2><span id="ic-usage"></span>用量仪表盘</h2>
+
+    <div class="filter-row">
+        <select id="channelFilter" onchange="load()"><option value="">全部渠道</option></select>
+    </div>
+
+    <div class="card">
+        <div class="stats-grid">
+            <div class="stat-item blue"><div class="num" id="s-input">-</div><div class="lbl">总输入</div></div>
+            <div class="stat-item pink"><div class="num" id="s-output">-</div><div class="lbl">总输出</div></div>
+            <div class="stat-item pink"><div class="num" id="s-cc">-</div><div class="lbl">缓存创建</div></div>
+            <div class="stat-item blue"><div class="num" id="s-cr">-</div><div class="lbl">缓存命中</div></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="section-label" style="margin-top:0;">明细</div>
+        <div class="meta-row"><span>请求总数</span><b id="m-req">-</b></div>
+        <div class="meta-row"><span>缓存命中率</span><b id="m-hit">-</b></div>
+        <div class="meta-row"><span>首次请求</span><b id="m-first">-</b></div>
+        <div class="meta-row"><span>最近请求</span><b id="m-last">-</b></div>
+    </div>
+</div>
+<script src="/static/app.js?v=1"></script>
+<script src="/static/icons.js?v=1"></script>
+<script>
+document.getElementById('ic-usage').innerHTML = ICONS.usage;
+
+function fmtTime(ts){
+    if(!ts) return '-';
+    const d = new Date((ts < 2e10 ? ts*1000 : ts) + 8*3600000);
+    const pad = n => String(n).padStart(2,'0');
+    return d.getUTCFullYear()+'-'+pad(d.getUTCMonth()+1)+'-'+pad(d.getUTCDate())+' '+pad(d.getUTCHours())+':'+pad(d.getUTCMinutes());
+}
+
+async function loadChannels(){
+    try{
+        const list = await apiJson('/api/channels');
+        const sel = document.getElementById('channelFilter');
+        list.forEach(c => {
+            const o = document.createElement('option');
+            o.value = c.id; o.textContent = c.name;
+            sel.appendChild(o);
+        });
+    }catch(e){}
+}
+
+async function load(){
+    const cid = document.getElementById('channelFilter').value;
+    const url = '/api/usage' + (cid ? '?channel_id='+cid : '');
+    try{
+        const d = await apiJson(url);
+        const totalInput = (d.total_input||0)+(d.total_cache_creation||0)+(d.total_cache_read||0);
+        document.getElementById('s-input').textContent = fmt(totalInput);
+        document.getElementById('s-output').textContent = fmt(d.total_output);
+        document.getElementById('s-cc').textContent = fmt(d.total_cache_creation);
+        document.getElementById('s-cr').textContent = fmt(d.total_cache_read);
+        document.getElementById('m-req').textContent = d.total_requests || 0;
+        const cr = d.total_cache_read || 0;
+        const denom = (d.total_input||0) + cr;
+        document.getElementById('m-hit').textContent = denom ? (cr/denom*100).toFixed(1)+'%' : '-';
+        document.getElementById('m-first').textContent = fmtTime(d.first_request);
+        document.getElementById('m-last').textContent = fmtTime(d.last_request);
+    }catch(e){}
+}
+
+loadChannels();
+load();
+</script>
+</body>
+</html>
