@@ -62,7 +62,7 @@ services:
     container_name: claudecatche
     restart: unless-stopped
     ports:
-      - "${BIND_HOST:-127.0.0.1}:${HOST_PORT:-29413}:29413"
+      - "${BIND_HOST:-127.0.0.1}:${HOST_PORT:-53247}:53247"
     volumes:
       - ./data:/data
     environment:
@@ -81,7 +81,7 @@ EOF
 
 cat > /opt/claudecatche/.env <<'EOF'
 BIND_HOST=0.0.0.0
-HOST_PORT=29413
+HOST_PORT=53247
 ADMIN_PASSWORD=改成你的强密码
 ACCESS_KEY=改成一个随机字符串
 EOF
@@ -91,16 +91,16 @@ EOF
 
 放行防火墙端口：
 
-ufw allow 29413/tcp 2>/dev/null || true
+ufw allow 53247/tcp 2>/dev/null || true
 
 （云服务商控制台的「安全组」也要放行同一个端口）
 
 访问方式：
-- 管理面板：http://你的VPS_IP:29413/
-- 客户端 API URL：http://你的VPS_IP:29413/<渠道名>
+- 管理面板：http://你的VPS_IP:53247/
+- 客户端 API URL：http://你的VPS_IP:53247/<渠道名>
   （客户端 Key 栏填「访问密钥 ACCESS_KEY」）
 
-如果 29413 被占用，把上面的 HOST_PORT=29413 改成别的（比如 8080），
+如果 53247 被占用，把上面的 HOST_PORT=53247 改成别的（比如 8080），
 访问地址也跟着改。
 
 ------ 情况 B：已有 nginx，想用域名访问 ------
@@ -109,7 +109,7 @@ ufw allow 29413/tcp 2>/dev/null || true
 
 cat > /opt/claudecatche/.env <<'EOF'
 BIND_HOST=127.0.0.1
-HOST_PORT=29413
+HOST_PORT=53247
 ADMIN_PASSWORD=改成你的强密码
 ACCESS_KEY=改成一个随机字符串
 EOF
@@ -122,7 +122,7 @@ server {
     server_name 你的子域名.example.com;
 
     location / {
-        proxy_pass http://127.0.0.1:29413;
+        proxy_pass http://127.0.0.1:53247;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -157,7 +157,7 @@ docker compose up -d
 
 docker compose logs -f
 
-看到 “Uvicorn running on http://0.0.0.0:29413” 就成功了。
+看到 “Uvicorn running on http://0.0.0.0:53247” 就成功了。
 
 ==========================================================
  第七步：登录管理面板，配置渠道
@@ -186,10 +186,10 @@ docker compose logs -f
 
 - API 类型：Claude / Anthropic
 - API URL：
-    情况 A：http://你的VPS_IP:29413/<渠道名>
+    情况 A：http://你的VPS_IP:53247/<渠道名>
     情况 B：https://你的子域名.example.com/<渠道名>
   例如渠道名 openrouter：
-    http://你的VPS_IP:29413/openrouter
+    http://你的VPS_IP:53247/openrouter
 - API Key：填「账户设置」里的访问密钥（ACCESS_KEY）
 
 发一条测试消息，能正常回复就成功了。

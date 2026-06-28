@@ -42,7 +42,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-默认端口 `29413`，管理面板 `http://127.0.0.1:29413/`，默认密码 `admin123`。
+默认端口 `53247`，管理面板 `http://127.0.0.1:53247/`，默认密码 `admin123`。
 
 ## Docker / VPS 部署
 

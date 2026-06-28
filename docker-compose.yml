@@ -4,7 +4,7 @@ services:
     container_name: claudecatche
     restart: unless-stopped
     ports:
-      - "${BIND_HOST:-127.0.0.1}:${HOST_PORT:-29413}:29413"
+      - "${BIND_HOST:-127.0.0.1}:${HOST_PORT:-53247}:53247"
     volumes:
       - ./data:/data
     environment:
