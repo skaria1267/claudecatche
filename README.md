@@ -12,6 +12,8 @@
 - **缓存断点** — 与 wanquan 一致的两种打标模式：
   - 自动模式：顶层 `cache_control`，由 API 自动管理断点
   - 自定义断点：最多 4 条规则，精确控制 system / messages 的断点位置
+- **OpenRouter 供应商锁定** — 渠道可开启后，模型名加 `@厂商` 后缀即**硬锁定**该上游供应商（`provider.only` + 不回退）；客户端拉模型时会自动带出 `@anthropic` / `@google-vertex` / `@amazon-bedrock` 等变体，下拉直接选
+- **模型列表管理** — 渠道配置可从上游一键拉取模型名、勾选保存，也可手动填；客户端能从 `你的地址/<渠道名>/v1/models` 拉取该渠道配置的模型清单
 - **访问密钥** — 在「账户设置」里配置连接本反代所需的访问密钥（客户端 Key 栏填这个）
 - **登录保护** — 管理面板有登录密码，密码可在面板「账户设置 → 安全」里修改
 - **请求日志 / 用量统计** — 每个渠道的 token 用量、缓存命中、耗时、状态码
@@ -34,6 +36,30 @@
 
 例如渠道名 `openrouter`：酒馆的 API URL 填 `http://你的地址/openrouter`，
 Key 填访问密钥即可。反代校验通过后，会用该渠道配置的上游 URL 和渠道 Key 转发。
+
+### 拉取模型列表（客户端）
+
+客户端可向以下任一路径拉取该渠道**已配置的模型清单**（同样用访问密钥鉴权）：
+
+- `GET /<渠道名>/v1/models`
+- `GET /<渠道名>/models`
+
+返回 OpenAI/Anthropic 通用的 `{"data":[{"id":"..."}]}` 结构。渠道开启「供应商锁定」后，
+每个模型会额外带出 `模型名@anthropic`、`模型名@google-vertex`、`模型名@amazon-bedrock` 等变体。
+
+## OpenRouter 供应商锁定
+
+OpenRouter 上的 Claude 由 **三家** 供给：`anthropic`（官方直连）、`google-vertex`、`amazon-bedrock`
+（基础 slug 会自动匹配各自的全部地区变体）。本反代支持在**模型名里指定供应商**，把它翻译成
+OpenRouter 的 `provider` 硬锁定字段：
+
+1. 渠道配置里打开「OpenRouter 供应商锁定」开关，填好「供应商清单」（默认即这三家）。
+2. 客户端模型名用 `<模型>@<供应商>` 形式，例如 `anthropic/claude-sonnet-4.5@google-vertex`。
+3. 反代会还原模型名，并注入 `provider: {"only": ["google-vertex"], "allow_fallbacks": false}`
+   ——**只走该供应商，挂了直接报错，不偷偷换家**。多个用逗号：`...@anthropic,azure`。
+
+> 提示：`@google-vertex` / `@amazon-bedrock` 不支持「自动模式」的顶层缓存；要对这两家做缓存请用「自定义断点（rules）」模式。
+> 渠道上游 URL 直接填 `https://openrouter.ai/api/v1` 即可（反代自动补 `/messages`），OpenRouter 原生支持 Anthropic Messages 格式。
 
 ## 快速开始（本地）
 

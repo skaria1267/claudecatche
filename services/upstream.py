@@ -69,6 +69,55 @@ def _endpoint(channel: dict) -> str:
     return _normalize_base_url(channel["base_url"])
 
 
+def _models_url(base_url: str) -> str:
+    """由渠道 base_url 推出模型列表地址：把 .../messages 换成 .../models。
+    例：https://openrouter.ai/api/v1 -> https://openrouter.ai/api/v1/models
+        https://api.anthropic.com    -> https://api.anthropic.com/v1/models
+    """
+    ep = _normalize_base_url(base_url)  # 总是以 /messages 结尾
+    return ep[: -len("/messages")] + "/models"
+
+
+async def fetch_upstream_models(base_url: str, api_key: str, auth_mode: str = "both") -> list:
+    """GET 上游模型列表，解析出模型 id（兼容 Anthropic / OpenRouter / OpenAI 式中转）。"""
+    url = _models_url(base_url)
+    headers = build_headers({"api_key": api_key, "auth_mode": auth_mode}, {})
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(url, headers=headers)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"上游返回 {resp.status_code}: {resp.text[:300]}")
+
+    try:
+        data = resp.json()
+    except Exception:
+        raise RuntimeError(f"上游返回的不是 JSON：{resp.text[:200]}")
+
+    if isinstance(data, dict):
+        items = data.get("data")
+        if not isinstance(items, list):
+            items = data.get("models")
+    elif isinstance(data, list):
+        items = data
+    else:
+        items = None
+
+    ids = []
+    for it in (items or []):
+        if isinstance(it, dict):
+            mid = it.get("id") or it.get("name")
+            if mid:
+                ids.append(str(mid))
+        elif isinstance(it, str) and it.strip():
+            ids.append(it.strip())
+    # 去重保序
+    seen, out = set(), []
+    for m in ids:
+        if m not in seen:
+            seen.add(m)
+            out.append(m)
+    return out
+
+
 async def _log(channel: dict, model: str, usage: dict, duration_ms: int, status: int):
     await add_request_log(
         channel_id=channel["id"], channel_name=channel["name"], model=model,

@@ -1,3 +1,5 @@
+import json
+import re
 import time
 from fastapi import APIRouter, HTTPException, Header, Request
 
@@ -14,6 +16,43 @@ def _extract_access_key(authorization: str, x_api_key: str) -> str:
     if authorization:
         return authorization.replace("Bearer ", "").strip()
     return ""
+
+
+def _parse_models(raw: str) -> list:
+    """渠道 models 字段兼容 JSON 数组 / 逗号 / 换行三种存法。"""
+    raw = (raw or "").strip()
+    if not raw:
+        return []
+    try:
+        v = json.loads(raw)
+        if isinstance(v, list):
+            return [str(x).strip() for x in v if str(x).strip()]
+    except Exception:
+        pass
+    return [p.strip() for p in re.split(r"[,\n]", raw) if p.strip()]
+
+
+def _build_client_models(channel: dict) -> list:
+    """返回推给客户端的模型列表：原始模型 + （开启供应商锁定时）每个模型的 @厂商 变体。"""
+    models = _parse_models(channel.get("models"))
+    or_on = int(channel.get("or_routing", 0) or 0) == 1
+    provs = []
+    if or_on:
+        provs = [p.strip() for p in (channel.get("or_providers") or "").split(",") if p.strip()]
+
+    out, seen = [], set()
+
+    def add(m):
+        if m and m not in seen:
+            seen.add(m)
+            out.append(m)
+
+    for m in models:
+        add(m)
+        if or_on and "@" not in m:
+            for p in provs:
+                add(f"{m}@{p}")
+    return out
 
 
 async def _handle(channel_name: str, request: Request,
@@ -47,6 +86,34 @@ async def _handle(channel_name: str, request: Request,
     start_time = time.time()
     forward = forward_stream if body.get("stream") else forward_normal
     return await forward(body, headers, channel, start_time)
+
+
+async def _handle_models(channel_name: str, authorization: str, x_api_key: str):
+    # 校验访问密钥（与转发一致）
+    expected = await get_setting("access_key")
+    if expected:
+        provided = _extract_access_key(authorization, x_api_key)
+        if provided != expected:
+            raise HTTPException(status_code=401, detail="Invalid access key")
+    channel = await get_channel_by_name(channel_name)
+    if not channel:
+        raise HTTPException(status_code=404, detail=f"渠道 '{channel_name}' 不存在")
+    ids = _build_client_models(channel)
+    return {"object": "list", "data": [{"id": m, "object": "model"} for m in ids]}
+
+
+@router.get("/{channel_name}/v1/models")
+async def list_models_full(channel_name: str,
+                           authorization: str = Header(None),
+                           x_api_key: str = Header(None)):
+    return await _handle_models(channel_name, authorization, x_api_key)
+
+
+@router.get("/{channel_name}/models")
+async def list_models_short(channel_name: str,
+                            authorization: str = Header(None),
+                            x_api_key: str = Header(None)):
+    return await _handle_models(channel_name, authorization, x_api_key)
 
 
 @router.post("/{channel_name}/v1/messages")

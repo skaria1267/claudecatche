@@ -6,6 +6,7 @@ from models import (
     update_channel, delete_channel,
 )
 from routers.auth import verify_token
+from services.upstream import fetch_upstream_models
 
 router = APIRouter()
 
@@ -27,6 +28,8 @@ class ChannelCreate(BaseModel):
     cache_mode: str = "auto"
     cache_ttl: str = "5m"
     cache_rules: str = "[]"
+    or_routing: int = 0
+    or_providers: str = "anthropic,google-vertex,amazon-bedrock"
 
 
 class ChannelUpdate(BaseModel):
@@ -39,7 +42,15 @@ class ChannelUpdate(BaseModel):
     cache_mode: str = None
     cache_ttl: str = None
     cache_rules: str = None
+    or_routing: int = None
+    or_providers: str = None
     is_active: int = None
+
+
+class FetchModelsRequest(BaseModel):
+    base_url: str
+    api_key: str = ""
+    auth_mode: str = "both"
 
 
 def _sanitize(data: dict):
@@ -72,6 +83,20 @@ async def create_channel(req: ChannelCreate, authorization: str = Header(None)):
         raise HTTPException(status_code=409, detail="渠道名已存在")
     await add_channel(**data)
     return {"ok": True}
+
+
+@router.post("/api/channels/fetch-models")
+async def fetch_models(req: FetchModelsRequest, authorization: str = Header(None)):
+    """用表单里的 base_url + key 去上游拉模型列表（配置渠道时用，渠道未保存也能拉）。"""
+    if not await verify_token(_auth(authorization)):
+        raise HTTPException(status_code=401)
+    if not req.base_url or not req.api_key:
+        raise HTTPException(status_code=400, detail="需要填写上游 URL 和渠道 Key")
+    try:
+        ids = await fetch_upstream_models(req.base_url, req.api_key, req.auth_mode or "both")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"拉取失败：{e}")
+    return {"models": ids}
 
 
 @router.get("/api/channels/{channel_id}")

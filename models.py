@@ -5,21 +5,26 @@ from database import get_db
 
 _CHANNEL_FIELDS = (
     "name", "base_url", "api_key", "auth_mode", "models",
-    "cache_enabled", "cache_mode", "cache_ttl", "cache_rules", "is_active",
+    "cache_enabled", "cache_mode", "cache_ttl", "cache_rules",
+    "or_routing", "or_providers", "is_active",
 )
 
 
 async def add_channel(name: str, base_url: str, api_key: str, auth_mode: str = "both",
                       models: str = "", cache_enabled: int = 1, cache_mode: str = "auto",
-                      cache_ttl: str = "5m", cache_rules: str = "[]"):
+                      cache_ttl: str = "5m", cache_rules: str = "[]",
+                      or_routing: int = 0,
+                      or_providers: str = "anthropic,google-vertex,amazon-bedrock"):
     async with get_db() as db:
         await db.execute(
             """INSERT INTO channels
                (name, base_url, api_key, auth_mode, models,
-                cache_enabled, cache_mode, cache_ttl, cache_rules)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                cache_enabled, cache_mode, cache_ttl, cache_rules,
+                or_routing, or_providers)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (name, base_url, api_key, auth_mode, models,
-             cache_enabled, cache_mode, cache_ttl, cache_rules)
+             cache_enabled, cache_mode, cache_ttl, cache_rules,
+             or_routing, or_providers)
         )
         await db.commit()
 

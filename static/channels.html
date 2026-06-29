@@ -75,6 +75,24 @@ h2{display:inline-flex;align-items:center;gap:10px;}
     display:none;z-index:999;box-shadow:0 4px 20px rgba(91,184,212,0.3);
 }
 @media(max-width:500px){.grid2,.mode-grid{grid-template-columns:1fr;}}
+
+textarea#f-models{
+    width:100%;padding:9px 12px;border:1.5px solid var(--border2);border-radius:8px;
+    background:var(--input-bg);color:var(--text);font-size:12px;
+    font-family:ui-monospace,Menlo,Consolas,monospace;resize:vertical;outline:none;
+    box-sizing:border-box;line-height:1.5;
+}
+textarea#f-models:focus{border-color:var(--blue);}
+.fetched-box{
+    margin-top:8px;padding:10px 12px;background:var(--input-bg);
+    border:1px dashed var(--border2);border-radius:10px;
+}
+.fetched-items{max-height:170px;overflow:auto;display:flex;flex-direction:column;gap:4px;}
+.fetched-items label{
+    display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text2);
+    font-family:ui-monospace,Menlo,Consolas,monospace;cursor:pointer;
+}
+.fetch-row{display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap;}
 </style>
 </head>
 <body>
@@ -138,8 +156,31 @@ h2{display:inline-flex;align-items:center;gap:10px;}
             </div>
         </div>
         <div class="form-group">
-            <label>支持的模型名（可选，逗号分隔，仅作展示记录）</label>
-            <input type="text" id="f-models" placeholder="claude-opus-4, claude-sonnet-4">
+            <label>支持的模型名（每行一个；客户端可从本渠道 URL 拉取这些）</label>
+            <textarea id="f-models" rows="4" placeholder="claude-opus-4-5&#10;claude-sonnet-4-5"></textarea>
+            <div class="fetch-row">
+                <button type="button" class="btn btn-outline btn-sm" onclick="fetchModels()">从上游拉取模型</button>
+                <span id="fetch-status" style="font-size:11px;color:var(--text4);"></span>
+            </div>
+            <div class="fetched-box" id="fetched-list" style="display:none;"></div>
+        </div>
+
+        <div class="section-label" style="margin:18px 0 10px;">OpenRouter 供应商锁定</div>
+        <div class="grid2">
+            <div class="form-group">
+                <label>启用（模型名 <span class="mono">@厂商</span> 硬锁定供应商）</label>
+                <select id="f-or-routing">
+                    <option value="0">关闭</option>
+                    <option value="1">开启</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>供应商清单（逗号分隔，开启后生成 @变体）</label>
+                <input type="text" id="f-or-providers" placeholder="anthropic,google-vertex,amazon-bedrock">
+            </div>
+        </div>
+        <div class="rule-hint" style="margin:-4px 0 4px;">
+            开启后：客户端拉到的每个模型会额外带上 <span class="mono">@anthropic</span> 等变体，选中即只走该供应商（不回退）。仅对走 OpenRouter 的渠道有意义。
         </div>
 
         <div class="section-label" style="margin:18px 0 10px;">缓存断点配置</div>
@@ -235,6 +276,68 @@ function renderRules(){
 function addRule(){ if(rules.length>=4) return; rules.push({target:'messages', direction:'backward', index:2}); renderRules(); }
 function removeRule(i){ rules.splice(i, 1); renderRules(); }
 
+// ===== 模型列表：文本框 <-> 数组 互转 =====
+function modelsToArray(text){
+    return [...new Set((text||'').split(/[\n,]/).map(s=>s.trim()).filter(Boolean))];
+}
+function modelsToText(raw){
+    let arr = [];
+    try{ const v = JSON.parse(raw || '[]'); if(Array.isArray(v)) arr = v; }
+    catch(e){ arr = (raw || '').split(/[\n,]/); }
+    return arr.map(s=>String(s).trim()).filter(Boolean).join('\n');
+}
+function resetFetched(){
+    const box = document.getElementById('fetched-list');
+    box.style.display = 'none'; box.innerHTML = '';
+    document.getElementById('fetch-status').textContent = '';
+}
+
+// ===== 从上游拉取模型 =====
+async function fetchModels(){
+    const base_url = document.getElementById('f-url').value.trim();
+    const api_key  = document.getElementById('f-key').value.trim();
+    const auth_mode= document.getElementById('f-auth').value;
+    const st = document.getElementById('fetch-status');
+    if(!base_url || !api_key){ alert('请先填写上游 URL 和渠道 Key'); return; }
+    st.textContent = '拉取中…';
+    try{
+        const r = await api('/api/channels/fetch-models', {method:'POST', body:JSON.stringify({base_url, api_key, auth_mode})});
+        if(!r.ok){ const e = await r.json().catch(()=>({})); st.textContent = '失败：'+(e.detail||r.status); return; }
+        const d = await r.json();
+        const ids = d.models || [];
+        renderFetched(ids);
+        st.textContent = '拉取到 '+ids.length+' 个';
+    }catch(e){ st.textContent = '失败：'+e.message; }
+}
+function renderFetched(ids){
+    const box = document.getElementById('fetched-list');
+    if(!ids.length){ box.style.display='none'; box.innerHTML=''; return; }
+    box.style.display = 'block';
+    box.innerHTML =
+        '<div style="font-size:11px;color:var(--text3);margin-bottom:6px;">勾选后点「添加选中」写入上方：</div>'+
+        '<div class="fetched-items" id="fetched-items"></div>'+
+        '<div class="fetch-row">'+
+            '<button type="button" class="btn btn-outline btn-sm" onclick="checkAllFetched(true)">全选</button>'+
+            '<button type="button" class="btn btn-outline btn-sm" onclick="checkAllFetched(false)">全不选</button>'+
+            '<button type="button" class="btn btn-blue btn-sm" onclick="addCheckedModels()">添加选中</button>'+
+        '</div>';
+    const items = document.getElementById('fetched-items');
+    ids.forEach(id => {
+        const lbl = document.createElement('label');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox'; cb.className = 'fchk'; cb.value = id; cb.checked = true;
+        lbl.appendChild(cb);
+        lbl.appendChild(document.createTextNode(' '+id));
+        items.appendChild(lbl);
+    });
+}
+function checkAllFetched(v){ document.querySelectorAll('.fchk').forEach(c => c.checked = v); }
+function addCheckedModels(){
+    const sel = [...document.querySelectorAll('.fchk:checked')].map(c => c.value);
+    const ta = document.getElementById('f-models');
+    ta.value = [...new Set([...modelsToArray(ta.value), ...sel])].join('\n');
+}
+
 function openAdd(){
     document.getElementById('modalTitle').textContent = '添加渠道';
     document.getElementById('f-id').value = '';
@@ -244,8 +347,11 @@ function openAdd(){
     document.getElementById('f-auth').value = 'both';
     document.getElementById('f-active').value = '1';
     document.getElementById('f-models').value = '';
+    document.getElementById('f-or-routing').value = '0';
+    document.getElementById('f-or-providers').value = 'anthropic,google-vertex,amazon-bedrock';
     document.getElementById('f-cache-enabled').value = '1';
     document.getElementById('f-cache-ttl').value = '5m';
+    resetFetched();
     rules = [];
     renderRules();
     selectMode('auto');
@@ -262,9 +368,12 @@ async function openEdit(id){
     document.getElementById('f-key').value = c.api_key;
     document.getElementById('f-auth').value = c.auth_mode || 'both';
     document.getElementById('f-active').value = String(c.is_active);
-    document.getElementById('f-models').value = c.models || '';
+    document.getElementById('f-models').value = modelsToText(c.models);
+    document.getElementById('f-or-routing').value = String(c.or_routing || 0);
+    document.getElementById('f-or-providers').value = c.or_providers || 'anthropic,google-vertex,amazon-bedrock';
     document.getElementById('f-cache-enabled').value = String(c.cache_enabled);
     document.getElementById('f-cache-ttl').value = c.cache_ttl || '5m';
+    resetFetched();
     try{ rules = JSON.parse(c.cache_rules || '[]'); }catch(e){ rules = []; }
     renderRules();
     selectMode(c.cache_mode || 'auto');
@@ -279,7 +388,9 @@ async function save(){
         api_key: document.getElementById('f-key').value.trim(),
         auth_mode: document.getElementById('f-auth').value,
         is_active: parseInt(document.getElementById('f-active').value),
-        models: document.getElementById('f-models').value.trim(),
+        models: JSON.stringify(modelsToArray(document.getElementById('f-models').value)),
+        or_routing: parseInt(document.getElementById('f-or-routing').value) || 0,
+        or_providers: document.getElementById('f-or-providers').value.trim(),
         cache_enabled: parseInt(document.getElementById('f-cache-enabled').value),
         cache_ttl: document.getElementById('f-cache-ttl').value,
         cache_mode: currentMode,

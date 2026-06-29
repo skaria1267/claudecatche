@@ -16,6 +16,8 @@ async def init_db():
                 cache_mode TEXT DEFAULT 'auto',
                 cache_ttl TEXT DEFAULT '5m',
                 cache_rules TEXT DEFAULT '[]',
+                or_routing INTEGER DEFAULT 0,
+                or_providers TEXT DEFAULT 'anthropic,google-vertex,amazon-bedrock',
                 is_active INTEGER DEFAULT 1,
                 created_at INTEGER DEFAULT (strftime('%s','now'))
             );
@@ -40,6 +42,16 @@ async def init_db():
                 value TEXT
             );
         """)
+
+        # 迁移：给已存在的旧库补 OpenRouter 供应商路由相关列
+        cur = await db.execute("PRAGMA table_info(channels)")
+        _cols = [r[1] for r in await cur.fetchall()]
+        if "or_routing" not in _cols:
+            await db.execute("ALTER TABLE channels ADD COLUMN or_routing INTEGER DEFAULT 0")
+        if "or_providers" not in _cols:
+            await db.execute(
+                "ALTER TABLE channels ADD COLUMN or_providers TEXT DEFAULT 'anthropic,google-vertex,amazon-bedrock'"
+            )
 
         # admin_password / access_key 只在首次初始化时写入（INSERT OR IGNORE），
         # 避免每次容器重启都被环境变量覆盖掉用户在面板里改过的值。
