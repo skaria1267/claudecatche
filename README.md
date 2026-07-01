@@ -1,13 +1,13 @@
 # Claude Catche
 
 多渠道 Claude API 缓存反向代理。在管理面板里添加各个中转/官转**渠道**（渠道名 + 上游 URL + 渠道 Key），
-客户端把 base URL 填成 `http://你的地址/<渠道名>`、Key 填**访问密钥**，发送标准 Claude 格式请求，
+客户端把 base URL 填成 `http://你的地址/<渠道名>/v1`、Key 填**访问密钥**，发送标准 Claude 格式请求，
 反代会校验访问密钥、按该渠道的缓存规则自动打缓存断点，再用该渠道的上游 URL 和 Key 转发出去。
 
 ## 核心特性
 
 - **多渠道路由** — 每个渠道独立配置上游 URL、Key、认证头模式、缓存规则
-- **URL 路由** — 客户端 base url 填 `你的地址/<渠道名>`，自动补 `/v1/messages`，和普通 Claude 反代填法一致
+- **URL 路由** — 客户端 base url 填 `你的地址/<渠道名>/v1`，自动补 `/messages`，和普通 Claude 反代填法一致
 - **认证头可选** — 每个渠道可选 `仅 x-api-key` / `仅 Authorization Bearer` / `两个都带`
 - **缓存断点** — 与 wanquan 一致的两种打标模式：
   - 自动模式：顶层 `cache_control`，由 API 自动管理断点
