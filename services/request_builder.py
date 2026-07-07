@@ -1,4 +1,5 @@
 import json
+import re
 
 from services.cache_inject import inject_cache_breakpoints
 
@@ -57,9 +58,47 @@ def _apply_provider_routing(body: dict, channel: dict) -> dict:
     return body
 
 
+# 思考虚拟模型名：<真实模型名>-thinking[-tier]，tier 取值 low/medium/high/xhigh/max。
+# 每渠道开关（thinking_alias）——有些中转站本身就有叫 xxx-thinking 的模型，
+# 默认关闭避免撞名，需要的渠道自行开启。
+_THINKING_ALIAS_RE = re.compile(
+    r"^(.+?)-thinking(?:-(low|medium|high|xhigh|max))?$"
+)
+
+
+def _apply_thinking_alias(body: dict, channel: dict) -> dict:
+    """渠道开启 thinking_alias 时，把虚拟模型名 `<模型>-thinking[-tier]`
+    展开为真实模型名 + adaptive thinking 参数。
+
+    覆盖语义：一旦模型名声明了 thinking/effort，客户端自带的 `thinking` /
+    `output_config` 一律被覆盖——模型名即契约。无 tier 时不注入
+    output_config，由上游默认挡位决定。
+
+    注意 adaptive thinking / effort 仅 Claude 4.6+ 模型支持，老模型用
+    虚拟名会被上游 400，由使用者自行保证。
+    """
+    if int(channel.get("thinking_alias", 0) or 0) != 1:
+        return body
+    model = body.get("model")
+    if not isinstance(model, str):
+        return body
+    m = _THINKING_ALIAS_RE.match(model)
+    if not m:
+        return body
+    base, tier = m.group(1), m.group(2)
+    body["model"] = base
+    body["thinking"] = {"type": "adaptive", "display": "summarized"}
+    if tier:
+        body["output_config"] = {"effort": tier}
+    else:
+        body.pop("output_config", None)
+    return body
+
+
 def prepare_request_body(raw_body: dict, channel: dict) -> dict:
     """按渠道配置打缓存断点，并过滤非法字段后返回发往上游的 body。"""
-    body = _apply_provider_routing(raw_body, channel)
+    body = _apply_provider_routing(raw_body, channel)  # 先剥 @供应商
+    body = _apply_thinking_alias(body, channel)        # 再剥 -thinking[-tier]
     body = _apply_cache_inject(body, channel)
     body = _filter_allowed_keys(body)
     return body

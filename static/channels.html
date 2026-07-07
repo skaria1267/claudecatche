@@ -112,7 +112,7 @@ textarea#f-models:focus{border-color:var(--blue);}
     <div class="card">
         <div class="table-wrap">
             <table>
-                <thead><tr><th>渠道名</th><th>上游 URL</th><th>认证</th><th>缓存</th><th>状态</th><th>操作</th></tr></thead>
+                <thead><tr><th>渠道名</th><th>上游 URL</th><th>认证</th><th>缓存</th><th>代理</th><th>状态</th><th>操作</th></tr></thead>
                 <tbody id="tbody"></tbody>
             </table>
             <div class="empty" id="empty" style="display:none;">还没有渠道，点击上方添加</div>
@@ -181,6 +181,31 @@ textarea#f-models:focus{border-color:var(--blue);}
         </div>
         <div class="rule-hint" style="margin:-4px 0 4px;">
             开启后：客户端拉到的每个模型会额外带上 <span class="mono">@anthropic</span> 等变体，选中即只走该供应商（不回退）。仅对走 OpenRouter 的渠道有意义。
+        </div>
+
+        <div class="section-label" style="margin:18px 0 10px;">思考虚拟模型名</div>
+        <div class="form-group">
+            <label>启用（模型名 <span class="mono">-thinking[-挡位]</span> 注入 adaptive thinking）</label>
+            <select id="f-thinking-alias">
+                <option value="0">关闭</option>
+                <option value="1">开启</option>
+            </select>
+        </div>
+        <div class="rule-hint" style="margin:-4px 0 4px;">
+            开启后：<span class="mono">claude-opus-4-7-thinking-max</span> 会以 <span class="mono">claude-opus-4-7</span> +
+            <span class="mono">thinking:adaptive</span> + <span class="mono">effort:max</span> 发往上游，挡位可选
+            <span class="mono">low/medium/high/xhigh/max</span>。仅 Claude 4.6+ 模型支持；
+            上游本身就有 <span class="mono">xxx-thinking</span> 模型名的渠道请勿开启。
+        </div>
+
+        <div class="section-label" style="margin:18px 0 10px;">出站代理</div>
+        <div class="form-group">
+            <label>代理地址（留空 = 直连；该渠道转发与拉模型列表都经此代理）</label>
+            <input type="text" id="f-proxy" placeholder="http://user:pass@host:port 或 socks5://host:port">
+        </div>
+        <div class="fetch-row" style="margin:-4px 0 4px;">
+            <button type="button" class="btn btn-outline btn-sm" onclick="testProxy()">测试连通性</button>
+            <span id="proxy-test-result" style="font-size:11px;"></span>
         </div>
 
         <div class="section-label" style="margin:18px 0 10px;">缓存断点配置</div>
@@ -299,9 +324,10 @@ async function fetchModels(){
     const auth_mode= document.getElementById('f-auth').value;
     const st = document.getElementById('fetch-status');
     if(!base_url || !api_key){ alert('请先填写上游 URL 和渠道 Key'); return; }
+    const proxy_url = document.getElementById('f-proxy').value.trim();
     st.textContent = '拉取中…';
     try{
-        const r = await api('/api/channels/fetch-models', {method:'POST', body:JSON.stringify({base_url, api_key, auth_mode})});
+        const r = await api('/api/channels/fetch-models', {method:'POST', body:JSON.stringify({base_url, api_key, auth_mode, proxy_url})});
         if(!r.ok){ const e = await r.json().catch(()=>({})); st.textContent = '失败：'+(e.detail||r.status); return; }
         const d = await r.json();
         const ids = d.models || [];
@@ -332,6 +358,31 @@ function renderFetched(ids){
     });
 }
 function checkAllFetched(v){ document.querySelectorAll('.fchk').forEach(c => c.checked = v); }
+
+// ===== 代理 =====
+function maskProxy(url){
+    return url.replace(/^(\w+:\/\/)([^@/]+)@/, '$1***@');
+}
+async function testProxy(){
+    const el = document.getElementById('proxy-test-result');
+    const proxy_url = document.getElementById('f-proxy').value.trim();
+    const target_url = document.getElementById('f-url').value.trim();  // 优先测渠道上游
+    el.style.color = 'var(--text4)';
+    el.textContent = '测试中...';
+    try{
+        const r = await api('/api/proxy-test', {method:'POST', body:JSON.stringify({proxy_url, target_url})});
+        const d = await r.json().catch(()=>({}));
+        if(!r.ok){ el.style.color = '#d77'; el.textContent = '✗ '+(d.detail || 'HTTP '+r.status); return; }
+        if(d.ok){
+            el.style.color = '#5fb98e';
+            el.textContent = '✓ 连通'+(proxy_url ? '' : '（直连）')+' · '+d.latency_ms+'ms'
+                + (d.exit_ip ? ' · 出口IP '+d.exit_ip : '');
+        }else{
+            el.style.color = '#d77';
+            el.textContent = '✗ 不通：'+(d.error || '未知错误');
+        }
+    }catch(e){ el.style.color = '#d77'; el.textContent = '✗ 请求失败：'+e.message; }
+}
 function addCheckedModels(){
     const sel = [...document.querySelectorAll('.fchk:checked')].map(c => c.value);
     const ta = document.getElementById('f-models');
@@ -349,6 +400,9 @@ function openAdd(){
     document.getElementById('f-models').value = '';
     document.getElementById('f-or-routing').value = '0';
     document.getElementById('f-or-providers').value = 'anthropic,google-vertex,amazon-bedrock';
+    document.getElementById('f-thinking-alias').value = '0';
+    document.getElementById('f-proxy').value = '';
+    document.getElementById('proxy-test-result').textContent = '';
     document.getElementById('f-cache-enabled').value = '1';
     document.getElementById('f-cache-ttl').value = '5m';
     resetFetched();
@@ -371,6 +425,9 @@ async function openEdit(id){
     document.getElementById('f-models').value = modelsToText(c.models);
     document.getElementById('f-or-routing').value = String(c.or_routing || 0);
     document.getElementById('f-or-providers').value = c.or_providers || 'anthropic,google-vertex,amazon-bedrock';
+    document.getElementById('f-thinking-alias').value = String(c.thinking_alias || 0);
+    document.getElementById('f-proxy').value = c.proxy_url || '';
+    document.getElementById('proxy-test-result').textContent = '';
     document.getElementById('f-cache-enabled').value = String(c.cache_enabled);
     document.getElementById('f-cache-ttl').value = c.cache_ttl || '5m';
     resetFetched();
@@ -391,6 +448,8 @@ async function save(){
         models: JSON.stringify(modelsToArray(document.getElementById('f-models').value)),
         or_routing: parseInt(document.getElementById('f-or-routing').value) || 0,
         or_providers: document.getElementById('f-or-providers').value.trim(),
+        thinking_alias: parseInt(document.getElementById('f-thinking-alias').value) || 0,
+        proxy_url: document.getElementById('f-proxy').value.trim(),
         cache_enabled: parseInt(document.getElementById('f-cache-enabled').value),
         cache_ttl: document.getElementById('f-cache-ttl').value,
         cache_mode: currentMode,
@@ -449,6 +508,16 @@ async function load(){
             tdCache.innerHTML = '<span class="tag tag-red">关闭</span>';
         }
 
+        const tdProxy = document.createElement('td');
+        tdProxy.className = 'url-cell mono';
+        if(c.proxy_url){
+            tdProxy.textContent = maskProxy(c.proxy_url);
+            tdProxy.title = maskProxy(c.proxy_url);
+        }else{
+            tdProxy.textContent = '直连';
+            tdProxy.style.color = 'var(--text4)';
+        }
+
         const tdStatus = document.createElement('td');
         tdStatus.innerHTML = c.is_active
             ? '<span class="tag tag-green">启用</span>'
@@ -463,7 +532,7 @@ async function load(){
         bDel.addEventListener('click', ()=>del(c.id, c.name));
         tdAct.append(bEdit, bTog, bDel);
 
-        tr.append(tdName, tdUrl, tdAuth, tdCache, tdStatus, tdAct);
+        tr.append(tdName, tdUrl, tdAuth, tdCache, tdProxy, tdStatus, tdAct);
         tb.appendChild(tr);
     });
 }

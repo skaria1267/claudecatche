@@ -78,11 +78,12 @@ def _models_url(base_url: str) -> str:
     return ep[: -len("/messages")] + "/models"
 
 
-async def fetch_upstream_models(base_url: str, api_key: str, auth_mode: str = "both") -> list:
+async def fetch_upstream_models(base_url: str, api_key: str, auth_mode: str = "both",
+                                proxy: str | None = None) -> list:
     """GET 上游模型列表，解析出模型 id（兼容 Anthropic / OpenRouter / OpenAI 式中转）。"""
     url = _models_url(base_url)
     headers = build_headers({"api_key": api_key, "auth_mode": auth_mode}, {})
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=30, proxy=proxy) as client:
         resp = await client.get(url, headers=headers)
     if resp.status_code >= 400:
         raise RuntimeError(f"上游返回 {resp.status_code}: {resp.text[:300]}")
@@ -133,8 +134,9 @@ async def forward_normal(body: dict, headers: dict, channel: dict, start_time: f
     """非流式转发。"""
     model = body.get("model", "")
     url = _endpoint(channel)
+    proxy = channel.get("proxy_url") or None
     try:
-        async with httpx.AsyncClient(timeout=300) as client:
+        async with httpx.AsyncClient(timeout=300, proxy=proxy) as client:
             resp = await client.post(url, headers=headers, json=body)
         duration_ms = int((time.time() - start_time) * 1000)
         try:
@@ -161,8 +163,9 @@ async def forward_stream(body: dict, headers: dict, channel: dict, start_time: f
     """流式转发：先探测状态码，错误则直接返回，正常则流式透传。"""
     model = body.get("model", "")
     url = _endpoint(channel)
+    proxy = channel.get("proxy_url") or None
     try:
-        client = httpx.AsyncClient(timeout=300)
+        client = httpx.AsyncClient(timeout=300, proxy=proxy)
         resp = await client.send(
             client.build_request("POST", url, headers=headers, json=body),
             stream=True,

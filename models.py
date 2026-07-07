@@ -6,7 +6,7 @@ from database import get_db
 _CHANNEL_FIELDS = (
     "name", "base_url", "api_key", "auth_mode", "models",
     "cache_enabled", "cache_mode", "cache_ttl", "cache_rules",
-    "or_routing", "or_providers", "is_active",
+    "or_routing", "or_providers", "thinking_alias", "proxy_url", "is_active",
 )
 
 
@@ -14,17 +14,18 @@ async def add_channel(name: str, base_url: str, api_key: str, auth_mode: str = "
                       models: str = "", cache_enabled: int = 1, cache_mode: str = "auto",
                       cache_ttl: str = "5m", cache_rules: str = "[]",
                       or_routing: int = 0,
-                      or_providers: str = "anthropic,google-vertex,amazon-bedrock"):
+                      or_providers: str = "anthropic,google-vertex,amazon-bedrock",
+                      thinking_alias: int = 0, proxy_url: str = ""):
     async with get_db() as db:
         await db.execute(
             """INSERT INTO channels
                (name, base_url, api_key, auth_mode, models,
                 cache_enabled, cache_mode, cache_ttl, cache_rules,
-                or_routing, or_providers)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                or_routing, or_providers, thinking_alias, proxy_url)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (name, base_url, api_key, auth_mode, models,
              cache_enabled, cache_mode, cache_ttl, cache_rules,
-             or_routing, or_providers)
+             or_routing, or_providers, thinking_alias, proxy_url)
         )
         await db.commit()
 

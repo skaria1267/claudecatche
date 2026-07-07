@@ -1,4 +1,6 @@
 import re
+import time
+import httpx
 from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
 from models import (
@@ -30,6 +32,8 @@ class ChannelCreate(BaseModel):
     cache_rules: str = "[]"
     or_routing: int = 0
     or_providers: str = "anthropic,google-vertex,amazon-bedrock"
+    thinking_alias: int = 0
+    proxy_url: str = ""
 
 
 class ChannelUpdate(BaseModel):
@@ -44,6 +48,8 @@ class ChannelUpdate(BaseModel):
     cache_rules: str = None
     or_routing: int = None
     or_providers: str = None
+    thinking_alias: int = None
+    proxy_url: str = None  # 传空串 = 清除代理（直连）
     is_active: int = None
 
 
@@ -51,6 +57,23 @@ class FetchModelsRequest(BaseModel):
     base_url: str
     api_key: str = ""
     auth_mode: str = "both"
+    proxy_url: str = ""
+
+
+class ProxyTest(BaseModel):
+    proxy_url: str = ""    # 空串 = 测试直连
+    target_url: str = ""   # 可传渠道 base_url，默认测 api.anthropic.com
+
+
+_PROXY_SCHEMES = ("http://", "https://", "socks5://", "socks5h://", "socks4://")
+
+
+def _validate_proxy(url: str):
+    if url and not url.startswith(_PROXY_SCHEMES):
+        raise HTTPException(
+            status_code=400,
+            detail="代理地址需以 http:// / https:// / socks5:// / socks5h:// / socks4:// 开头",
+        )
 
 
 def _sanitize(data: dict):
@@ -59,6 +82,9 @@ def _sanitize(data: dict):
     if "name" in data and data["name"] is not None:
         if not _NAME_RE.match(data["name"]):
             raise HTTPException(status_code=400, detail="渠道名只能包含字母、数字、下划线、连字符")
+    if "proxy_url" in data and data["proxy_url"] is not None:
+        data["proxy_url"] = data["proxy_url"].strip()
+        _validate_proxy(data["proxy_url"])
 
 
 @router.get("/api/channels")
@@ -92,11 +118,46 @@ async def fetch_models(req: FetchModelsRequest, authorization: str = Header(None
         raise HTTPException(status_code=401)
     if not req.base_url or not req.api_key:
         raise HTTPException(status_code=400, detail="需要填写上游 URL 和渠道 Key")
+    proxy_url = (req.proxy_url or "").strip()
+    _validate_proxy(proxy_url)
     try:
-        ids = await fetch_upstream_models(req.base_url, req.api_key, req.auth_mode or "both")
+        ids = await fetch_upstream_models(req.base_url, req.api_key, req.auth_mode or "both",
+                                          proxy=proxy_url or None)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"拉取失败：{e}")
     return {"models": ids}
+
+
+@router.post("/api/proxy-test")
+async def proxy_test(req: ProxyTest, authorization: str = Header(None)):
+    """测试代理连通性：经代理请求目标地址（默认 api.anthropic.com），并尽量取出口 IP。"""
+    if not await verify_token(_auth(authorization)):
+        raise HTTPException(status_code=401)
+    proxy_url = req.proxy_url.strip()
+    _validate_proxy(proxy_url)
+    proxy = proxy_url or None
+    target = (req.target_url or "").strip() or "https://api.anthropic.com/"
+    if not target.startswith(("http://", "https://")):
+        target = "https://" + target
+
+    result = {"ok": False, "target": target}
+    try:
+        async with httpx.AsyncClient(timeout=15, proxy=proxy) as client:
+            start = time.time()
+            resp = await client.get(target)
+            result["ok"] = True
+            result["latency_ms"] = int((time.time() - start) * 1000)
+            result["status"] = resp.status_code
+            # 出口 IP，仅作参考，失败不影响连通结论
+            try:
+                ip_resp = await client.get("https://api.ipify.org", timeout=8)
+                if ip_resp.status_code == 200:
+                    result["exit_ip"] = ip_resp.text.strip()
+            except Exception:
+                pass
+    except Exception as e:
+        result["error"] = f"{type(e).__name__}: {e}"
+    return result
 
 
 @router.get("/api/channels/{channel_id}")

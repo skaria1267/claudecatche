@@ -33,9 +33,11 @@ def _parse_models(raw: str) -> list:
 
 
 def _build_client_models(channel: dict) -> list:
-    """返回推给客户端的模型列表：原始模型 + （开启供应商锁定时）每个模型的 @厂商 变体。"""
+    """返回推给客户端的模型列表：原始模型 + （开启供应商锁定时）@厂商变体
+    + （开启思考虚拟名时）-thinking 变体。"""
     models = _parse_models(channel.get("models"))
     or_on = int(channel.get("or_routing", 0) or 0) == 1
+    think_on = int(channel.get("thinking_alias", 0) or 0) == 1
     provs = []
     if or_on:
         provs = [p.strip() for p in (channel.get("or_providers") or "").split(",") if p.strip()]
@@ -49,6 +51,9 @@ def _build_client_models(channel: dict) -> list:
 
     for m in models:
         add(m)
+        # 思考虚拟名变体（挡位后缀 -low/-medium/-high/-xhigh/-max 客户端可自行追加）
+        if think_on and "@" not in m and "-thinking" not in m:
+            add(f"{m}-thinking")
         if or_on and "@" not in m:
             for p in provs:
                 add(f"{m}@{p}")
