@@ -43,6 +43,40 @@ async def init_db():
                 key TEXT PRIMARY KEY,
                 value TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS openai_config (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                base_url TEXT NOT NULL DEFAULT 'https://api.openai.com/v1',
+                api_key TEXT NOT NULL DEFAULT '',
+                models TEXT NOT NULL DEFAULT '[]',
+                is_active INTEGER NOT NULL DEFAULT 0,
+                proxy_url TEXT NOT NULL DEFAULT '',
+                thinking_alias INTEGER NOT NULL DEFAULT 0,
+                cache_mode TEXT NOT NULL DEFAULT 'off',
+                cache_key TEXT NOT NULL DEFAULT '',
+                cache_rules TEXT NOT NULL DEFAULT '[]',
+                updated_at INTEGER DEFAULT (strftime('%s','now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS openai_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                model TEXT,
+                prompt_tokens INTEGER DEFAULT 0,
+                completion_tokens INTEGER DEFAULT 0,
+                cached_tokens INTEGER DEFAULT 0,
+                cache_write_tokens INTEGER DEFAULT 0,
+                reasoning_tokens INTEGER DEFAULT 0,
+                request_at INTEGER DEFAULT (strftime('%s','now')),
+                duration_ms INTEGER DEFAULT 0,
+                status INTEGER DEFAULT 200
+            );
+        """)
+
+        await db.execute("""
+            INSERT OR IGNORE INTO openai_config (
+                id, base_url, api_key, models, is_active, proxy_url,
+                thinking_alias, cache_mode, cache_key, cache_rules
+            ) VALUES (1, 'https://api.openai.com/v1', '', '[]', 0, '', 0, 'off', '', '[]')
         """)
 
         # 迁移：给已存在的旧库补 OpenRouter 供应商路由相关列

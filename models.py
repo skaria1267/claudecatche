@@ -148,3 +148,58 @@ async def set_setting(key: str, value: str):
             (key, value)
         )
         await db.commit()
+
+
+# ========== OpenAI 独立配置与请求日志 ==========
+
+async def get_openai_config():
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM openai_config WHERE id = 1") as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+
+async def update_openai_config(**kwargs):
+    if not kwargs:
+        return
+    kwargs["updated_at"] = int(__import__("time").time())
+    fields = ", ".join(f"{key} = ?" for key in kwargs)
+    async with get_db() as db:
+        await db.execute(
+            f"UPDATE openai_config SET {fields} WHERE id = 1",
+            [*kwargs.values()],
+        )
+        await db.commit()
+
+
+async def add_openai_request_log(model: str, prompt_tokens: int,
+                                 completion_tokens: int, cached_tokens: int,
+                                 cache_write_tokens: int, reasoning_tokens: int,
+                                 duration_ms: int, status: int):
+    async with get_db() as db:
+        await db.execute("""
+            INSERT INTO openai_requests (
+                model, prompt_tokens, completion_tokens, cached_tokens,
+                cache_write_tokens, reasoning_tokens, duration_ms, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            model, prompt_tokens, completion_tokens, cached_tokens,
+            cache_write_tokens, reasoning_tokens, duration_ms, status,
+        ))
+        await db.commit()
+
+
+async def get_openai_usage():
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("""
+            SELECT COUNT(*) AS total_requests,
+                   COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                   COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+                   COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+                   COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
+                   COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens
+            FROM openai_requests
+        """) as cursor:
+            return dict(await cursor.fetchone())

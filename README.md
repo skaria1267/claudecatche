@@ -20,6 +20,7 @@
 - **登录保护** — 管理面板有登录密码，密码可在面板「账户设置 → 安全」里修改
 - **请求日志 / 用量统计** — 每个渠道的 token 用量、缓存命中、耗时、状态码
 - **Web 管理面板** — 纯 Vanilla JS，无 emoji，图标全部 SVG，日间/夜间主题
+- **独立 OpenAI 转发** — `/gpt/v1` 使用独立官方 Key、模型清单、代理、Prompt Cache 与思考后缀配置，不经过 Claude 渠道处理链
 
 ## 请求路由说明
 
@@ -48,6 +49,20 @@ Key 填访问密钥即可。反代校验通过后，会用该渠道配置的上�
 
 返回 OpenAI/Anthropic 通用的 `{"data":[{"id":"..."}]}` 结构。渠道开启「供应商锁定」后，
 每个模型会额外带出 `模型名@anthropic`、`模型名@google-vertex`、`模型名@amazon-bedrock` 等变体。
+
+## OpenAI 独立转发
+
+在控制台进入「OpenAI 转发」，配置 OpenAI API Key、模型、出站代理及缓存模式。酒馆使用
+OpenAI Compatible 模式：
+
+- Base URL：`http://你的地址/gpt/v1`
+- API Key：账户设置中的 Access Key
+- 模型列表：`GET /gpt/v1/models`
+- 对话请求：`POST /gpt/v1/chat/completions`
+
+开启思考后缀后，`gpt-5.6-sol-thinking-high` 会转成 `gpt-5.6-sol` 并注入
+`reasoning_effort: "high"`；无挡位的 `-thinking` 默认使用 `medium`。缓存可关闭、使用隐式模式，
+或配置最多四个显式消息断点；OpenAI Key 只保存在服务端，管理 API 仅返回掩码。
 
 ## OpenRouter 供应商锁定
 
@@ -121,10 +136,13 @@ claudecatche/
 │   ├── channels.py      # 渠道增删改查
 │   ├── settings.py      # 设置读写
 │   ├── logs.py          # 日志 / 用量 / 失败记录
+│   ├── openai.py        # 独立 OpenAI 配置与 /gpt/v1 转发
 │   └── proxy.py         # 反代核心：路由匹配渠道 + 转发
 ├── services/
 │   ├── cache_inject.py  # 缓存断点注入（auto / rules）
 │   ├── request_builder.py # 按渠道配置打断点 + 清洗字段
+│   ├── openai_request_builder.py # OpenAI 缓存与思考后缀请求构造
+│   ├── openai_upstream.py # OpenAI 模型拉取、流式转发与用量日志
 │   └── upstream.py      # 上游转发（认证头 / 流式 / 日志）
 └── static/              # 前端页面
     ├── theme.js index.html dashboard.html

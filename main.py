@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from database import init_db
-from routers import auth, channels, settings, logs, proxy
+from routers import auth, channels, settings, logs, openai, proxy
 from config import PORT
 
 app = FastAPI()
@@ -61,6 +61,11 @@ async def logs_page():
     return FileResponse("static/logs.html")
 
 
+@app.get("/page/openai")
+async def openai_page():
+    return FileResponse("static/openai.html")
+
+
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -69,6 +74,7 @@ app.include_router(auth.router)
 app.include_router(channels.router)
 app.include_router(settings.router)
 app.include_router(logs.router)
+app.include_router(openai.router)
 
 # ===== 反代通配路由（最后注册，避免吃掉上面的具体路径）=====
 app.include_router(proxy.router)

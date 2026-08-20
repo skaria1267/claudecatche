@@ -29,6 +29,9 @@
 .card-pink .title{color:var(--pink);}
 .card-blue:hover{background:rgba(91,184,212,0.14);box-shadow:0 6px 24px rgba(91,184,212,0.12);}
 .card-pink:hover{background:rgba(255,183,197,0.14);box-shadow:0 6px 24px rgba(255,183,197,0.12);}
+.card-mint{background:rgba(143,217,182,0.10);border:2px solid rgba(143,217,182,0.35);color:var(--text);}
+.card-mint .title{color:#5fb98e;}
+.card-mint:hover{background:rgba(143,217,182,0.16);box-shadow:0 6px 24px rgba(143,217,182,0.12);}
 
 .quick-stats{margin-top:28px;}
 .quick-stats h3{font-size:13px;color:var(--text3);margin-bottom:14px;font-weight:600;text-transform:uppercase;letter-spacing:1px;}
@@ -64,6 +67,11 @@
             <div class="title">账户设置</div>
             <div class="desc">访问密钥、管理员密码</div>
         </a>
+        <a class="nav-card card-mint" href="/page/openai">
+            <div class="icon" id="icon-openai"></div>
+            <div class="title">OpenAI 转发</div>
+            <div class="desc">独立 Key、模型、代理、缓存与思考设置</div>
+        </a>
         <a class="nav-card card-pink" href="/page/usage">
             <div class="icon" id="icon-usage"></div>
             <div class="title">用量仪表盘</div>
@@ -91,6 +99,7 @@
 ['channels','settings','usage','logs'].forEach(k=>{
     document.getElementById('icon-'+k).innerHTML = ICONS[k];
 });
+document.getElementById('icon-openai').innerHTML = ICONS.channels;
 
 (async function init(){
     try{
