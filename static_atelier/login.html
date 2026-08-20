@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>登录 · Claude Catche</title>
+  <link rel="stylesheet" href="/atelier-static/atelier.css?v=1">
+</head>
+<body class="login-page">
+  <main class="login-shell">
+    <section class="login-brand">
+      <div class="brand-mark">CC</div>
+      <p class="eyebrow light">PRIVATE ROUTING STUDIO</p>
+      <h1>Claude<br>Catche</h1>
+      <p>管理模型渠道、缓存与独立 OpenAI 转发。</p>
+      <div class="login-foot">ATELIER CONSOLE · LOCAL</div>
+    </section>
+    <section class="login-form-wrap">
+      <form class="login-form" id="login-form">
+        <p class="eyebrow">WELCOME BACK</p>
+        <h2>进入控制台</h2>
+        <p class="form-intro">使用管理员密码继续。</p>
+        <label class="field">
+          <span>管理员密码</span>
+          <input id="password" type="password" autocomplete="current-password" autofocus placeholder="输入密码">
+        </label>
+        <p class="form-error" id="login-error" aria-live="polite"></p>
+        <button class="btn primary wide" type="submit">登录 <span aria-hidden="true">→</span></button>
+        <a class="text-link center" href="/ui/classic">切换到经典界面</a>
+      </form>
+    </section>
+  </main>
+  <script>
+    if (localStorage.getItem('token')) location.href = '/dashboard';
+    document.getElementById('login-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const button = event.currentTarget.querySelector('button');
+      const error = document.getElementById('login-error');
+      button.disabled = true;
+      button.firstChild.textContent = '登录中 ';
+      error.textContent = '';
+      try {
+        const response = await fetch('/api/login', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({password: document.getElementById('password').value})
+        });
+        if (!response.ok) throw new Error(response.status === 401 ? '密码不正确' : '登录失败');
+        localStorage.setItem('token', (await response.json()).token);
+        location.href = '/dashboard';
+      } catch (e) {
+        error.textContent = e.message;
+        button.disabled = false;
+        button.firstChild.textContent = '登录 ';
+      }
+    });
+  </script>
+</body>
+</html>
