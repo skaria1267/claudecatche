@@ -46,9 +46,21 @@
   function checked(id) { return document.getElementById(id)?.checked ? 1 : 0; }
 
   document.getElementById('side-nav').innerHTML = `<p class="side-group-label">WORKSPACE</p>` + nav.map(([i,n,p]) => `<a class="side-link ${path===p?'active':''}" data-path="${p}" href="${p}"><span class="nav-index">${i}</span><span>${n}</span></a>`).join('');
-  document.getElementById('mobile-nav').innerHTML = nav.map(([i,n,p]) => `<a class="${path===p?'active':''}" href="${p}"><span>${i}</span><span>${n}</span></a>`).join('');
   document.querySelector(`[data-path="/page/settings"]`)?.classList.toggle('active', path === '/page/settings');
   document.querySelector('[data-action="logout"]').onclick = () => { localStorage.removeItem('token'); location.href = '/'; };
+  const sidebar = document.querySelector('.sidebar');
+  const menuToggle = document.getElementById('mobile-menu-toggle');
+  const menuBackdrop = document.getElementById('mobile-menu-backdrop');
+  function setMobileMenu(open) {
+    sidebar.classList.toggle('mobile-open', open);
+    menuToggle.classList.toggle('open', open);
+    menuBackdrop.classList.toggle('open', open);
+    menuToggle.setAttribute('aria-expanded', String(open));
+    menuToggle.setAttribute('aria-label', open ? '关闭目录' : '打开目录');
+  }
+  menuToggle.onclick = () => setMobileMenu(!sidebar.classList.contains('mobile-open'));
+  menuBackdrop.onclick = () => setMobileMenu(false);
+  sidebar.querySelectorAll('a').forEach(link => link.addEventListener('click', () => setMobileMenu(false)));
   backdrop.onclick = closeDrawer;
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
 
@@ -79,6 +91,35 @@
     empty.innerHTML = list.length ? '' : '<div class="empty"><strong>没有匹配的渠道</strong>换一个关键词，或新建渠道。</div>';
     body.querySelectorAll('tr').forEach(row => row.onclick = () => channelDrawer(Number(row.dataset.id)));
   }
+  function activateSegments(groupId, inputId, value, panelId = null, panelValue = null) {
+    const input = document.getElementById(inputId);
+    input.value = value;
+    document.querySelectorAll(`#${groupId} .segment`).forEach(button => {
+      button.classList.toggle('active', button.dataset.value === value);
+      button.onclick = () => activateSegments(groupId, inputId, button.dataset.value, panelId, panelValue);
+    });
+    if (panelId) document.getElementById(panelId).classList.toggle('active', value === panelValue);
+  }
+  function renderRuleBuilder(rootId, rules, withTarget) {
+    const root = document.getElementById(rootId);
+    const addButton = root.parentElement.querySelector('[data-add-rule]');
+    if (addButton) addButton.style.display = rules.length >= 4 ? 'none' : 'inline-flex';
+    if (!rules.length) {
+      root.innerHTML = '<div class="rule-empty">还没有自定义断点。</div>';
+      return;
+    }
+    root.innerHTML = rules.map((rule, index) => `<div class="rule-row ${withTarget?'':'oai-rule'}" data-rule="${index}">
+      ${withTarget ? `<select data-field="target"><option value="system" ${rule.target==='system'?'selected':''}>system</option><option value="messages" ${rule.target!=='system'?'selected':''}>messages</option></select>` : ''}
+      <select data-field="direction"><option value="forward" ${rule.direction==='forward'?'selected':''}>正数第</option><option value="backward" ${rule.direction!=='forward'?'selected':''}>倒数第</option></select>
+      <input data-field="index" type="number" min="1" max="999" value="${Math.max(1,Number(rule.index)||1)}"><span class="rule-unit">${withTarget?'条':'条消息'}</span><button class="rule-delete" type="button" title="删除断点">×</button></div>`).join('');
+    root.querySelectorAll('[data-rule]').forEach(row => {
+      const index = Number(row.dataset.rule);
+      row.querySelectorAll('[data-field]').forEach(control => control.onchange = () => {
+        rules[index][control.dataset.field] = control.dataset.field === 'index' ? Math.max(1, Number(control.value)||1) : control.value;
+      });
+      row.querySelector('.rule-delete').onclick = () => { rules.splice(index, 1); renderRuleBuilder(rootId, rules, withTarget); };
+    });
+  }
   async function channelDrawer(id = null) {
     const c = id ? await api(`/api/channels/${id}`) : {name:'',base_url:'',api_key:'',auth_mode:'both',models:'[]',cache_enabled:1,cache_mode:'auto',cache_ttl:'5m',cache_rules:'[]',or_routing:0,or_providers:'anthropic,google-vertex,amazon-bedrock',thinking_alias:0,proxy_url:'',is_active:1};
     let rules; try { rules=JSON.parse(c.cache_rules||'[]'); } catch (_) { rules=[]; }
@@ -89,17 +130,19 @@
       <label class="field full"><span>模型列表（每行一个）</span><textarea id="c-models" placeholder="claude-sonnet-4-6">${esc(models(c.models).join('\n'))}</textarea><div class="inline-actions"><button class="btn" id="c-fetch" type="button">拉取模型</button><small id="c-fetch-status"></small></div></label>
       <label class="field full"><span>出站代理</span><input id="c-proxy" value="${esc(c.proxy_url)}" placeholder="http://user:pass@host:port"><div class="inline-actions"><button class="btn" id="c-test" type="button">测试连通性</button><small id="c-test-status">留空为直连</small></div></label></div>
       <div class="toggle-row"><div class="toggle-copy"><strong>启用渠道</strong><p>停用后不再接受此渠道的请求。</p></div><label class="switch"><input id="c-active" type="checkbox" ${c.is_active?'checked':''}><span></span></label></div>
-      <div class="toggle-row"><div class="toggle-copy"><strong>缓存注入</strong><p>按选定模式向 Claude 请求添加缓存断点。</p></div><label class="switch"><input id="c-cache" type="checkbox" ${c.cache_enabled?'checked':''}><span></span></label></div>
-      <div class="toggle-row"><div class="toggle-copy"><strong>思考模型别名</strong><p>识别模型名的 thinking effort 后缀。</p></div><label class="switch"><input id="c-thinking" type="checkbox" ${c.thinking_alias?'checked':''}><span></span></label></div>
-      <details class="advanced"><summary>高级配置</summary><div class="form-grid"><label class="field"><span>缓存模式</span><select id="c-cache-mode"><option value="auto">自动</option><option value="rules">自定义断点</option></select></label><label class="field"><span>缓存 TTL</span><select id="c-ttl"><option value="5m">5 分钟</option><option value="1h">1 小时</option></select></label><label class="field full"><span>缓存规则 JSON</span><textarea id="c-rules">${esc(JSON.stringify(rules,null,2))}</textarea><small>最多 4 条，保留现有 system / messages 规则结构。</small></label><label class="field full"><span>OpenRouter 供应商</span><input id="c-providers" value="${esc(c.or_providers)}"></label></div><div class="toggle-row"><div class="toggle-copy"><strong>供应商后缀路由</strong><p>生成并识别 @provider 模型别名。</p></div><label class="switch"><input id="c-or" type="checkbox" ${c.or_routing?'checked':''}><span></span></label></div></details>
+      <section class="setting-section"><div class="setting-section-title"><h3>缓存断点</h3><span>最多 4 条</span></div><div class="toggle-row"><div class="toggle-copy"><strong>启用缓存注入</strong><p>向 Claude 请求添加缓存控制。</p></div><label class="switch"><input id="c-cache" type="checkbox" ${c.cache_enabled?'checked':''}><span></span></label></div><div class="form-grid"><label class="field"><span>打标模式</span><input id="c-cache-mode" type="hidden"><div class="segmented" id="c-cache-segments"><button class="segment" data-value="auto" type="button">自动模式</button><button class="segment" data-value="rules" type="button">自定义断点</button></div></label><label class="field"><span>缓存 TTL</span><select id="c-ttl"><option value="5m">5 分钟</option><option value="1h">1 小时</option></select></label></div><div class="rules-builder" id="c-rules-panel"><div id="c-rules"></div><button class="btn" id="c-add-rule" data-add-rule type="button">＋ 添加规则</button><p class="row-meta">每条规则选择 system 或 messages、正数或倒数位置。</p></div></section>
+      <section class="setting-section"><div class="setting-section-title"><h3>OpenRouter 供应商</h3><span>@provider</span></div><div class="toggle-row"><div class="toggle-copy"><strong>供应商后缀路由</strong><p>生成并识别 @provider 模型别名。</p></div><label class="switch"><input id="c-or" type="checkbox" ${c.or_routing?'checked':''}><span></span></label></div><label class="field"><span>供应商清单（逗号分隔）</span><input id="c-providers" value="${esc(c.or_providers)}"></label></section>
+      <section class="setting-section"><div class="setting-section-title"><h3>思考模型别名</h3><span>thinking effort</span></div><div class="toggle-row"><div class="toggle-copy"><strong>启用思考后缀</strong><p>识别模型名的 -thinking[-挡位] 后缀。</p></div><label class="switch"><input id="c-thinking" type="checkbox" ${c.thinking_alias?'checked':''}><span></span></label></div></section>
       <div class="drawer-actions">${id?'<button class="btn danger" id="c-delete">删除渠道</button>':'<span></span>'}<div class="inline-actions"><button class="btn" data-close>取消</button><button class="btn primary" id="c-save">保存</button></div></div></div>`);
-    document.getElementById('c-auth').value=c.auth_mode||'both'; document.getElementById('c-cache-mode').value=c.cache_mode||'auto'; document.getElementById('c-ttl').value=c.cache_ttl||'5m';
+    document.getElementById('c-auth').value=c.auth_mode||'both'; document.getElementById('c-ttl').value=c.cache_ttl||'5m';
+    activateSegments('c-cache-segments','c-cache-mode',c.cache_mode||'auto','c-rules-panel','rules');
+    renderRuleBuilder('c-rules', rules, true);
+    document.getElementById('c-add-rule').onclick = () => { if(rules.length<4){rules.push({target:'messages',direction:'backward',index:2});renderRuleBuilder('c-rules',rules,true);} };
     drawer.querySelectorAll('[data-close]').forEach(x=>x.onclick=closeDrawer);
     document.getElementById('c-fetch').onclick = async () => actionStatus('c-fetch-status', async () => { const d=await api('/api/channels/fetch-models',{method:'POST',body:JSON.stringify({base_url:formValue('c-url'),api_key:formValue('c-key'),auth_mode:formValue('c-auth'),proxy_url:formValue('c-proxy')})}); document.getElementById('c-models').value=d.models.join('\n'); return `已拉取 ${d.models.length} 个模型`; });
     document.getElementById('c-test').onclick = async () => actionStatus('c-test-status', async () => { const d=await api('/api/proxy-test',{method:'POST',body:JSON.stringify({proxy_url:formValue('c-proxy'),target_url:formValue('c-url')})}); if(!d.ok) throw new Error(d.error||'连接失败'); return `连通 · ${d.latency_ms}ms${d.exit_ip?' · '+d.exit_ip:''}`; });
     document.getElementById('c-save').onclick = async () => {
-      let cacheRules; try { cacheRules=JSON.parse(formValue('c-rules')||'[]'); } catch (_) { toast('缓存规则不是合法 JSON',true); return; }
-      const payload={name:formValue('c-name').trim(),base_url:formValue('c-url').trim(),api_key:formValue('c-key').trim(),auth_mode:formValue('c-auth'),models:JSON.stringify(lines(formValue('c-models'))),cache_enabled:checked('c-cache'),cache_mode:formValue('c-cache-mode'),cache_ttl:formValue('c-ttl'),cache_rules:JSON.stringify(cacheRules),or_routing:checked('c-or'),or_providers:formValue('c-providers').trim(),thinking_alias:checked('c-thinking'),proxy_url:formValue('c-proxy').trim(),is_active:checked('c-active')};
+      const payload={name:formValue('c-name').trim(),base_url:formValue('c-url').trim(),api_key:formValue('c-key').trim(),auth_mode:formValue('c-auth'),models:JSON.stringify(lines(formValue('c-models'))),cache_enabled:checked('c-cache'),cache_mode:formValue('c-cache-mode'),cache_ttl:formValue('c-ttl'),cache_rules:JSON.stringify(formValue('c-cache-mode')==='rules'?rules:[]),or_routing:checked('c-or'),or_providers:formValue('c-providers').trim(),thinking_alias:checked('c-thinking'),proxy_url:formValue('c-proxy').trim(),is_active:checked('c-active')};
       if(!payload.name||!payload.base_url||!payload.api_key){toast('请填写名称、上游 URL 和 API Key',true);return;}
       try { await api(id?`/api/channels/${id}`:'/api/channels',{method:id?'PATCH':'POST',body:JSON.stringify(payload)}); closeDrawer(); toast('渠道已保存'); await channelsPage(); } catch(e){toast(e.message,true);}
     };
@@ -116,11 +159,13 @@
       <label class="field full"><span>出站代理</span><input id="o-proxy" value="${esc(c.proxy_url||'')}" placeholder="留空直连"></label><label class="field full"><span>模型列表（每行一个）</span><textarea id="o-models">${esc(models(c.models).join('\n'))}</textarea></label></div>
       <div class="inline-actions"><button class="btn" id="o-test">测试连接</button><button class="btn" id="o-fetch">拉取模型</button><span class="row-meta" id="o-status"></span></div>
       <div class="toggle-row"><div class="toggle-copy"><strong>启用 OpenAI 转发</strong><p>客户端使用 /gpt/v1 和访问密钥连接。</p></div><label class="switch"><input id="o-active" type="checkbox" ${c.is_active?'checked':''}><span></span></label></div><div class="toggle-row"><div class="toggle-copy"><strong>思考预算后缀</strong><p>从客户端模型名解析 reasoning effort。</p></div><label class="switch"><input id="o-thinking" type="checkbox" ${c.thinking_alias?'checked':''}><span></span></label></div></div></section>
-      <aside class="stack"><section class="panel"><div class="panel-head"><h3>客户端连接</h3></div><div class="panel-body stack"><label class="field"><span>OAI 兼容地址</span><input readonly value="${esc(location.origin+'/gpt/v1')}"></label><p class="notice">密码填写账户设置中的访问密钥，实际官方 Key 不会下发到客户端。</p></div></section><section class="panel"><div class="panel-head"><h3>缓存</h3></div><div class="panel-body stack"><label class="field"><span>缓存模式</span><select id="o-cache"><option value="off">关闭</option><option value="implicit">隐式缓存</option><option value="explicit">自定义断点</option></select></label><label class="field"><span>Prompt cache key</span><input id="o-cache-key" value="${esc(c.cache_key||'')}" placeholder="可留空"></label><label class="field"><span>断点规则 JSON</span><textarea id="o-rules">${esc(JSON.stringify(rules,null,2))}</textarea><small>自定义模式最多 4 条。</small></label></div></section></aside></div></div>`;
-    document.getElementById('o-cache').value=c.cache_mode||'off';
+      <aside class="stack"><section class="panel"><div class="panel-head"><h3>客户端连接</h3></div><div class="panel-body stack"><label class="field"><span>OAI 兼容地址</span><input readonly value="${esc(location.origin+'/gpt/v1')}"></label><p class="notice">密码填写账户设置中的访问密钥，实际官方 Key 不会下发到客户端。</p></div></section><section class="panel"><div class="panel-head"><h3>Prompt Cache</h3></div><div class="panel-body stack"><label class="field"><span>缓存模式</span><input id="o-cache" type="hidden"><div class="segmented" id="o-cache-segments"><button class="segment" data-value="off" type="button">关闭</button><button class="segment" data-value="implicit" type="button">隐式</button><button class="segment" data-value="explicit" type="button">显式断点</button></div></label><label class="field"><span>Prompt cache key</span><input id="o-cache-key" value="${esc(c.cache_key||'')}" placeholder="可留空"></label><div class="rules-builder" id="o-rules-panel"><div id="o-rules"></div><button class="btn" id="o-add-rule" data-add-rule type="button">＋ 添加断点</button><p class="row-meta">断点落在所选消息的最后一个内容块上，最多 4 条。</p></div></div></section></aside></div></div>`;
+    activateSegments('o-cache-segments','o-cache',c.cache_mode||'off','o-rules-panel','explicit');
+    renderRuleBuilder('o-rules',rules,false);
+    document.getElementById('o-add-rule').onclick=()=>{if(rules.length<4){rules.push({direction:'backward',index:2});renderRuleBuilder('o-rules',rules,false);}};
     document.getElementById('o-test').onclick=()=>actionStatus('o-status',async()=>{const d=await api('/api/openai/test',{method:'POST',body:JSON.stringify(oaiConnection())});if(!d.ok)throw new Error(d.error||`HTTP ${d.status}`);return `连接正常 · ${d.latency_ms}ms`;});
     document.getElementById('o-fetch').onclick=()=>actionStatus('o-status',async()=>{const d=await api('/api/openai/fetch-models',{method:'POST',body:JSON.stringify(oaiConnection())});document.getElementById('o-models').value=d.models.join('\n');return `已拉取 ${d.models.length} 个模型`;});
-    document.getElementById('o-save').onclick=async()=>{let cacheRules;try{cacheRules=JSON.parse(formValue('o-rules')||'[]')}catch(_){toast('缓存规则不是合法 JSON',true);return}const payload={base_url:formValue('o-url').trim(),api_key:formValue('o-key').trim(),models:JSON.stringify(lines(formValue('o-models'))),is_active:checked('o-active'),proxy_url:formValue('o-proxy').trim(),thinking_alias:checked('o-thinking'),cache_mode:formValue('o-cache'),cache_key:formValue('o-cache-key').trim(),cache_rules:JSON.stringify(cacheRules)};try{await api('/api/openai/config',{method:'PATCH',body:JSON.stringify(payload)});toast('OpenAI 配置已保存');await openaiPage()}catch(e){toast(e.message,true)}};
+    document.getElementById('o-save').onclick=async()=>{const payload={base_url:formValue('o-url').trim(),api_key:formValue('o-key').trim(),models:JSON.stringify(lines(formValue('o-models'))),is_active:checked('o-active'),proxy_url:formValue('o-proxy').trim(),thinking_alias:checked('o-thinking'),cache_mode:formValue('o-cache'),cache_key:formValue('o-cache-key').trim(),cache_rules:JSON.stringify(formValue('o-cache')==='explicit'?rules:[])};try{await api('/api/openai/config',{method:'PATCH',body:JSON.stringify(payload)});toast('OpenAI 配置已保存');await openaiPage()}catch(e){toast(e.message,true)}};
   }
   function oaiConnection(){return {base_url:formValue('o-url').trim(),api_key:formValue('o-key').trim(),proxy_url:formValue('o-proxy').trim()}}
 
