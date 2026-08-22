@@ -1,5 +1,3 @@
-$env:FRONTEND_VARIANT = "atelier"
-$env:FRONTEND_ALLOW_SWITCH = "0"
 Set-Location $PSScriptRoot
 
 if (Get-Command python -ErrorAction SilentlyContinue) {

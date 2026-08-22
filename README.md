@@ -182,10 +182,9 @@ claudecatche/
 │   ├── openai_request_builder.py # OpenAI 缓存与思考后缀请求构造
 │   ├── openai_upstream.py # OpenAI 模型拉取、流式转发与用量日志
 │   └── upstream.py      # 上游转发（认证头 / 流式 / 日志）
-└── static/              # 前端页面
-    ├── theme.js index.html dashboard.html
-    ├── channels.html settings.html usage.html logs.html
-    ├── common.css app.js icons.js
+└── static_atelier/      # 唯一管理前端（桌面/移动端响应式）
+    ├── login.html app.html
+    └── atelier.css atelier.js
 ```
 
 ## 技术栈
