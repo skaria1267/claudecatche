@@ -184,7 +184,7 @@ async def authcode_complete(account_id: int, session_id: str, callback_url: str)
     )
     _auth_sessions.pop(session_id, None)
     await save_login(account_id, tokens)
-    return {"status": "ready", "account": await codex_store.get_account(account_id)}
+    return {"status": "ready", "account": await codex_store.get_public_account(account_id)}
 
 
 async def device_poll(account_id: int, device_auth_id: str, user_code: str) -> dict:
@@ -204,7 +204,7 @@ async def device_poll(account_id: int, device_auth_id: str, user_code: str) -> d
     data = response.json()
     tokens = await _exchange_code(data["authorization_code"], data["code_verifier"], proxy)
     await save_login(account_id, tokens)
-    return {"status": "ready", "account": await codex_store.get_account(account_id)}
+    return {"status": "ready", "account": await codex_store.get_public_account(account_id)}
 
 
 async def save_login(account_id: int, tokens: dict) -> None:

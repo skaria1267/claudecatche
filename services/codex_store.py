@@ -58,6 +58,11 @@ async def get_account(account_id: int, decrypt: bool = False) -> dict | None:
     return result
 
 
+async def get_public_account(account_id: int) -> dict | None:
+    account = await get_account(account_id)
+    return _public(account) if account else None
+
+
 async def update_account(account_id: int, **updates) -> None:
     allowed = {
         "name", "account_uid", "email", "subscription_type", "proxy_url", "models",

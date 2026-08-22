@@ -67,6 +67,14 @@ class SubscriptionIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         raw_codex = await codex_store.get_account(codex_id)
         self.assertNotIn("access_token", raw_codex)
+        await codex_store.save_tokens(
+            codex_id, "access-token", "refresh-token", "id-token", 9999999999,
+            "account-id", "codex@example.com",
+        )
+        public_codex = await codex_store.get_public_account(codex_id)
+        self.assertTrue(public_codex["authenticated"])
+        for secret_field in ("access_secret", "refresh_secret", "id_secret"):
+            self.assertNotIn(secret_field, public_codex)
 
         for kind, model in (("codex", "gpt-5.3-codex"), ("claudecode", "claude-sonnet-4-6")):
             response = await self.client.patch(

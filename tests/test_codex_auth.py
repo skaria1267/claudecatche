@@ -51,14 +51,17 @@ class CodexAuthcodeTests(unittest.IsolatedAsyncioTestCase):
         account = {"id": 7, "proxy_url": "http://proxy.example:8080"}
         exchange = AsyncMock(return_value={"access_token": "access", "expires_in": 3600})
         save = AsyncMock()
+        public_account = AsyncMock(return_value={"id": 7, "authenticated": True})
         with (
             patch("services.codex_auth.codex_store.get_account", AsyncMock(return_value=account)),
             patch("services.codex_auth._exchange_code", exchange),
             patch("services.codex_auth.save_login", save),
+            patch("services.codex_auth.codex_store.get_public_account", public_account),
         ):
             result = await codex_auth.authcode_complete(7, session_id, callback_url)
 
         self.assertEqual(result["status"], "ready")
+        self.assertTrue(result["account"]["authenticated"])
         exchange.assert_awaited_once_with(
             "auth-code", session["verifier"], account["proxy_url"],
             codex_auth.AUTHCODE_REDIRECT_URI,
