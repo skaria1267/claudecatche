@@ -11,6 +11,9 @@ import httpx
 
 from database import init_db
 from main import app
+from models import add_openai_request_log, add_request_log
+from services.openai_upstream import forward_openai_normal
+from services.upstream import clear_failures, get_recent_failures
 
 
 class OpenAIIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -28,6 +31,7 @@ class OpenAIIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.admin_headers = {
             "Authorization": "Bearer " + response.json()["token"]
         }
+        clear_failures()
 
     async def asyncTearDown(self):
         await self.client.aclose()
@@ -70,6 +74,82 @@ class OpenAIIntegrationTests(unittest.IsolatedAsyncioTestCase):
             [item["id"] for item in response.json()["data"]],
             ["gpt-5.6-sol", "gpt-5.6-sol-thinking"],
         )
+
+    async def test_logs_include_openai_usage_fields(self):
+        await add_request_log(
+            channel_id=1, channel_name="Claude A", model="claude-test",
+            input_tokens=10, output_tokens=4,
+            cache_creation_tokens=3, cache_read_tokens=2,
+            duration_ms=120, status=200,
+        )
+        await add_openai_request_log(
+            model="gpt-5.6-sol", prompt_tokens=100,
+            completion_tokens=30, cached_tokens=60,
+            cache_write_tokens=20, reasoning_tokens=12,
+            duration_ms=450, status=200,
+        )
+
+        response = await self.client.get(
+            "/api/logs?source=openai", headers=self.admin_headers
+        )
+        self.assertEqual(response.status_code, 200)
+        rows = response.json()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["source"], "openai")
+        self.assertEqual(rows[0]["channel_name"], "OpenAI")
+        self.assertEqual(rows[0]["input_tokens"], 100)
+        self.assertEqual(rows[0]["output_tokens"], 30)
+        self.assertEqual(rows[0]["cache_creation_tokens"], 20)
+        self.assertEqual(rows[0]["cache_read_tokens"], 60)
+        self.assertEqual(rows[0]["reasoning_tokens"], 12)
+
+        response = await self.client.get(
+            "/api/logs", headers=self.admin_headers
+        )
+        self.assertEqual({row["source"] for row in response.json()}, {"claude", "openai"})
+
+    async def test_openai_failure_keeps_complete_request_body(self):
+        class FakeResponse:
+            status_code = 429
+            text = '{"error":{"message":"rate limited"}}'
+
+            def json(self):
+                return {"error": {"message": "rate limited"}}
+
+        class FakeClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def post(self, *args, **kwargs):
+                return FakeResponse()
+
+        import unittest.mock
+        body = {
+            "model": "gpt-5.6-sol",
+            "messages": [{"role": "user", "content": "keep all of this"}],
+            "reasoning_effort": "high",
+        }
+        config = {
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-test",
+            "proxy_url": "",
+        }
+        with unittest.mock.patch(
+            "services.openai_upstream.httpx.AsyncClient", FakeClient
+        ):
+            response = await forward_openai_normal(body, config, 0)
+
+        self.assertEqual(response.status_code, 429)
+        failures = get_recent_failures()
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]["channel"], "OpenAI")
+        self.assertEqual(failures[0]["body"], body)
 
 
 if __name__ == "__main__":

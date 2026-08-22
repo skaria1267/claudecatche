@@ -37,7 +37,7 @@ h2{display:inline-flex;align-items:center;gap:10px;}
     <div class="card">
         <div class="table-wrap">
             <table>
-                <thead><tr><th>时间</th><th>渠道</th><th>模型</th><th>输入</th><th>输出</th><th>缓存写/读</th><th>耗时</th><th>状态</th></tr></thead>
+                <thead><tr><th>时间</th><th>渠道</th><th>模型</th><th>输入</th><th>输出</th><th>缓存写/读</th><th>推理</th><th>耗时</th><th>状态</th></tr></thead>
                 <tbody id="tbody"></tbody>
             </table>
             <div class="empty" id="empty" style="display:none;">暂无日志</div>
@@ -68,6 +68,9 @@ async function loadChannels(){
     try{
         const list = await apiJson('/api/channels');
         const sel = document.getElementById('channelFilter');
+        const openai = document.createElement('option');
+        openai.value = 'openai'; openai.textContent = 'OpenAI';
+        sel.appendChild(openai);
         list.forEach(c => {
             const o = document.createElement('option');
             o.value = c.id; o.textContent = c.name;
@@ -78,7 +81,8 @@ async function loadChannels(){
 
 async function load(){
     const cid = document.getElementById('channelFilter').value;
-    const url = '/api/logs?limit=100' + (cid ? '&channel_id='+cid : '');
+    const url = '/api/logs?limit=100' +
+        (cid === 'openai' ? '&source=openai' : (cid ? '&channel_id='+cid : ''));
     const list = await apiJson(url);
     const tb = document.getElementById('tbody');
     tb.innerHTML = '';
@@ -93,6 +97,7 @@ async function load(){
             '<td>'+fmt(r.input_tokens)+'</td>'+
             '<td>'+fmt(r.output_tokens)+'</td>'+
             '<td>'+fmt(r.cache_creation_tokens)+' / '+fmt(r.cache_read_tokens)+'</td>'+
+            '<td>'+(r.source === 'openai' ? fmt(r.reasoning_tokens) : '计入输出')+'</td>'+
             '<td>'+(r.duration_ms||0)+'ms</td>'+
             '<td class="'+(ok?'status-ok':'status-err')+'">'+r.status+'</td>';
         tb.appendChild(tr);
@@ -114,7 +119,11 @@ async function loadFailures(){
                 (f.upstream_status?(' · HTTP '+f.upstream_status):'')+
                 (f.error_type?(' · '+escapeHtml(f.error_type)):'');
             const detail = f.upstream_body || f.error_repr || '';
-            div.innerHTML = '<b>'+head+'</b>'+(detail?('<pre>'+escapeHtml(detail)+'</pre>'):'');
+            const requestBody = JSON.stringify(f.body || {}, null, 2);
+            div.innerHTML = '<b>'+head+'</b>'+
+                (detail?('<pre>'+escapeHtml(detail)+'</pre>'):'')+
+                '<div style="margin-top:8px;font-weight:600;">完整请求内容</div>'+
+                '<pre>'+escapeHtml(requestBody)+'</pre>';
             box.appendChild(div);
         });
     }catch(e){ box.innerHTML = '<div class="empty">加载失败</div>'; }

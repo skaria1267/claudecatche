@@ -109,6 +109,47 @@ async def get_requests(channel_id: int = None, limit: int = 50, offset: int = 0)
         return [dict(row) for row in rows]
 
 
+async def get_request_logs(channel_id: int = None, source: str = "all",
+                           limit: int = 50, offset: int = 0):
+    """Return Claude and OpenAI requests with one UI-facing schema."""
+    source = source if source in ("all", "claude", "openai") else "all"
+    claude_sql = """
+        SELECT id, 'claude' AS source, channel_id, channel_name, model,
+               input_tokens, output_tokens,
+               cache_creation_tokens, cache_read_tokens,
+               0 AS reasoning_tokens, request_at, duration_ms, status
+        FROM requests
+    """
+    openai_sql = """
+        SELECT id, 'openai' AS source, NULL AS channel_id,
+               'OpenAI' AS channel_name, model,
+               prompt_tokens AS input_tokens,
+               completion_tokens AS output_tokens,
+               cache_write_tokens AS cache_creation_tokens,
+               cached_tokens AS cache_read_tokens,
+               reasoning_tokens, request_at, duration_ms, status
+        FROM openai_requests
+    """
+
+    params = []
+    if channel_id is not None:
+        query = claude_sql + " WHERE channel_id = ?"
+        params.append(channel_id)
+    elif source == "claude":
+        query = claude_sql
+    elif source == "openai":
+        query = openai_sql
+    else:
+        query = f"{claude_sql} UNION ALL {openai_sql}"
+    query = f"SELECT * FROM ({query}) ORDER BY request_at DESC LIMIT ? OFFSET ?"
+    params.extend((limit, offset))
+
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(query, params) as cursor:
+            return [dict(row) for row in await cursor.fetchall()]
+
+
 async def get_usage_summary(channel_id: int = None):
     async with get_db() as db:
         db.row_factory = aiosqlite.Row

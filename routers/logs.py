@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Header
-from models import get_requests, get_usage_summary
+from models import get_request_logs, get_usage_summary
 from routers.auth import verify_token
 from services.upstream import get_recent_failures, clear_failures
 
@@ -11,11 +11,14 @@ def _auth(authorization):
 
 
 @router.get("/api/logs")
-async def list_logs(channel_id: int = None, limit: int = 50, offset: int = 0,
+async def list_logs(channel_id: int = None, source: str = "all",
+                    limit: int = 50, offset: int = 0,
                     authorization: str = Header(None)):
     if not await verify_token(_auth(authorization)):
         raise HTTPException(status_code=401)
-    return await get_requests(channel_id=channel_id, limit=limit, offset=offset)
+    return await get_request_logs(
+        channel_id=channel_id, source=source, limit=limit, offset=offset
+    )
 
 
 @router.get("/api/usage")
