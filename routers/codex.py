@@ -7,7 +7,9 @@ from pydantic import BaseModel
 from models import get_setting, set_setting
 from routers.auth import verify_token
 from services import codex_store
-from services.codex_auth import device_poll, device_start, valid_token
+from services.codex_auth import (
+    authcode_complete, authcode_start, device_poll, device_start, valid_token,
+)
 from services.codex_request_builder import client_models, prepare_chat, prepare_responses
 from services.codex_upstream import clear_failures, failures, fetch_models, fetch_usage, forward
 from services.proxy_config import normalize_proxy_url
@@ -59,6 +61,11 @@ class AccountUpdate(BaseModel):
 class DevicePollRequest(BaseModel):
     device_auth_id: str
     user_code: str
+
+
+class AuthcodeCompleteRequest(BaseModel):
+    login_session_id: str
+    callback_url: str
 
 
 class ConfigUpdate(BaseModel):
@@ -135,6 +142,26 @@ async def start_device(account_id: int, authorization: str = Header(None)):
     await _admin(authorization)
     try:
         return await device_start(account_id)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/api/codex/accounts/{account_id}/authcode/start")
+async def start_authcode(account_id: int, authorization: str = Header(None)):
+    await _admin(authorization)
+    try:
+        return await authcode_start(account_id)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/api/codex/accounts/{account_id}/authcode/complete")
+async def complete_authcode(
+    account_id: int, req: AuthcodeCompleteRequest, authorization: str = Header(None),
+):
+    await _admin(authorization)
+    try:
+        return await authcode_complete(account_id, req.login_session_id, req.callback_url)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
