@@ -11,3 +11,4 @@ services:
       DB_PATH: /data/proxy.db
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
       ACCESS_KEY: ${ACCESS_KEY:-}
+      CATCH_MASTER_KEY: ${CATCH_MASTER_KEY:-}

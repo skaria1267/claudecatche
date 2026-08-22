@@ -21,6 +21,9 @@
 - **请求日志 / 用量统计** — 每个渠道的 token 用量、缓存命中、耗时、状态码
 - **Web 管理面板** — 纯 Vanilla JS，无 emoji，图标全部 SVG，日间/夜间主题
 - **独立 OpenAI 转发** — `/gpt/v1` 使用独立官方 Key、模型清单、代理、Prompt Cache 与思考后缀配置，不经过 Claude 渠道处理链
+- **Codex 订阅转发** — `/codex/v1` 支持设备码 OAuth、多账号、五小时/周/独立模型窗口、credits、账号代理、模型拉取、缓存断点与思考后缀
+- **Claude Code 订阅转发** — `/claudecode/v1` 整合 Wanquan 的 sessionKey/OAuth、多账号、用量、代理、缓存与思考功能
+- **日志完全隔离** — Claude 渠道、OpenAI API、Codex 订阅和 Claude Code 订阅各自使用独立表、页面和失败请求区
 
 ## 请求路由说明
 
@@ -63,6 +66,41 @@ OpenAI Compatible 模式：
 开启思考后缀后，`gpt-5.6-sol-thinking-high` 会转成 `gpt-5.6-sol` 并注入
 `reasoning_effort: "high"`；无挡位的 `-thinking` 默认使用 `medium`。缓存可关闭、使用隐式模式，
 或配置最多四个显式消息断点；OpenAI Key 只保存在服务端，管理 API 仅返回掩码。
+
+## Codex 与 Claude Code 订阅转发
+
+首先设置 `CATCH_MASTER_KEY`（base64 编码的 32 字节密钥），订阅凭据才能写入数据库：
+
+```bash
+openssl rand -base64 32
+```
+
+- Codex：前端添加账号后点击「开始设备授权」，按提示打开 OpenAI 设备授权页并输入代码。
+- Claude Code：添加账号时填入 Claude `sessionKey`，服务端自动换取并刷新 OAuth token。
+- 两者均使用「设置」中的全局 Access Key 作为客户端密码。
+- 代理支持 URL、`host:port` 和 `host:port:user:password` 格式。
+
+SillyTavern 使用 OpenAI Compatible 连接 Codex：
+
+- Base URL：`https://你的域名/codex/v1`
+- 模型：可从 `/codex/v1/models` 拉取，也可直接填模型名
+- 思考：`<model>-thinking-high` 会转成 Responses API 的 `reasoning.effort=high`
+
+Claude/Anthropic 客户端连接 Claude Code：
+
+- Base URL：`https://你的域名/claudecode/v1`
+- Messages：`POST /claudecode/v1/messages`
+- 思考：`<model>-thinking-medium` 会注入 adaptive thinking 和 `output_config.effort`
+
+### 从 Wanquan 迁移
+
+先停止写入旧 Wanquan 数据库，备份两个 SQLite 文件，再在 Catch 容器或虚拟环境执行：
+
+```bash
+python scripts/import_wanquan.py /path/to/wanquan.db --target /data/proxy.db
+```
+
+导入会新增账号和日志，不删除 Catch 现有数据，也不修改 Wanquan 原库。
 
 ## OpenRouter 供应商锁定
 

@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse
 from database import init_db
-from routers import auth, channels, settings, logs, openai, proxy
+from routers import auth, channels, settings, logs, openai, codex, claudecode, proxy
 from config import PORT
 
 app = FastAPI()
@@ -87,6 +87,26 @@ async def openai_page(request: Request):
     return frontend_page(request, "openai.html")
 
 
+@app.get("/page/codex")
+async def codex_page(request: Request):
+    return frontend_page(request, "subscriptions.html")
+
+
+@app.get("/page/codex-logs")
+async def codex_logs_page(request: Request):
+    return frontend_page(request, "subscriptions.html")
+
+
+@app.get("/page/claudecode")
+async def claudecode_page(request: Request):
+    return frontend_page(request, "subscriptions.html")
+
+
+@app.get("/page/claudecode-logs")
+async def claudecode_logs_page(request: Request):
+    return frontend_page(request, "subscriptions.html")
+
+
 @app.get("/ui/{variant}")
 async def select_frontend(variant: str):
     selected = variant.strip().lower()
@@ -108,6 +128,8 @@ app.include_router(channels.router)
 app.include_router(settings.router)
 app.include_router(logs.router)
 app.include_router(openai.router)
+app.include_router(codex.router)
+app.include_router(claudecode.router)
 
 # ===== 反代通配路由（最后注册，避免吃掉上面的具体路径）=====
 app.include_router(proxy.router)

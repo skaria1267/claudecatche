@@ -69,6 +69,7 @@ services:
       DB_PATH: /data/proxy.db
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
       ACCESS_KEY: ${ACCESS_KEY:-}
+      CATCH_MASTER_KEY: ${CATCH_MASTER_KEY:-}
 EOF
 
 ==========================================================
@@ -84,6 +85,7 @@ BIND_HOST=0.0.0.0
 HOST_PORT=53247
 ADMIN_PASSWORD=改成你的强密码
 ACCESS_KEY=改成一个随机字符串
+CATCH_MASTER_KEY=粘贴 openssl rand -base64 32 的输出
 EOF
 
 提示：ACCESS_KEY 一定要设，否则别人扫到端口+猜到渠道名就能白嫖。
@@ -112,6 +114,7 @@ BIND_HOST=127.0.0.1
 HOST_PORT=53247
 ADMIN_PASSWORD=改成你的强密码
 ACCESS_KEY=改成一个随机字符串
+CATCH_MASTER_KEY=粘贴 openssl rand -base64 32 的输出
 EOF
 
 给 nginx 加配置（把 你的子域名.example.com 换成你的域名）：

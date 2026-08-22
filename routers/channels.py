@@ -9,10 +9,12 @@ from models import (
 )
 from routers.auth import verify_token
 from services.upstream import fetch_upstream_models
+from services.proxy_config import normalize_proxy_url
 
 router = APIRouter()
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_RESERVED_NAMES = {"gpt", "codex", "claudecode"}
 
 
 def _auth(authorization):
@@ -65,15 +67,11 @@ class ProxyTest(BaseModel):
     target_url: str = ""   # 可传渠道 base_url，默认测 api.anthropic.com
 
 
-_PROXY_SCHEMES = ("http://", "https://", "socks5://", "socks5h://", "socks4://")
-
-
 def _validate_proxy(url: str):
-    if url and not url.startswith(_PROXY_SCHEMES):
-        raise HTTPException(
-            status_code=400,
-            detail="代理地址需以 http:// / https:// / socks5:// / socks5h:// / socks4:// 开头",
-        )
+    try:
+        return normalize_proxy_url(url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def _sanitize(data: dict):
@@ -82,9 +80,10 @@ def _sanitize(data: dict):
     if "name" in data and data["name"] is not None:
         if not _NAME_RE.match(data["name"]):
             raise HTTPException(status_code=400, detail="渠道名只能包含字母、数字、下划线、连字符")
+        if data["name"].lower() in _RESERVED_NAMES:
+            raise HTTPException(status_code=400, detail="该渠道名已被系统路由保留")
     if "proxy_url" in data and data["proxy_url"] is not None:
-        data["proxy_url"] = data["proxy_url"].strip()
-        _validate_proxy(data["proxy_url"])
+        data["proxy_url"] = _validate_proxy(data["proxy_url"])
 
 
 @router.get("/api/channels")
@@ -103,7 +102,7 @@ async def list_channels(authorization: str = Header(None)):
 async def create_channel(req: ChannelCreate, authorization: str = Header(None)):
     if not await verify_token(_auth(authorization)):
         raise HTTPException(status_code=401)
-    data = req.dict()
+    data = req.model_dump()
     _sanitize(data)
     if await get_channel_by_name(req.name):
         raise HTTPException(status_code=409, detail="渠道名已存在")
@@ -118,8 +117,7 @@ async def fetch_models(req: FetchModelsRequest, authorization: str = Header(None
         raise HTTPException(status_code=401)
     if not req.base_url or not req.api_key:
         raise HTTPException(status_code=400, detail="需要填写上游 URL 和渠道 Key")
-    proxy_url = (req.proxy_url or "").strip()
-    _validate_proxy(proxy_url)
+    proxy_url = _validate_proxy(req.proxy_url)
     try:
         ids = await fetch_upstream_models(req.base_url, req.api_key, req.auth_mode or "both",
                                           proxy=proxy_url or None)
@@ -133,8 +131,7 @@ async def proxy_test(req: ProxyTest, authorization: str = Header(None)):
     """测试代理连通性：经代理请求目标地址（默认 api.anthropic.com），并尽量取出口 IP。"""
     if not await verify_token(_auth(authorization)):
         raise HTTPException(status_code=401)
-    proxy_url = req.proxy_url.strip()
-    _validate_proxy(proxy_url)
+    proxy_url = _validate_proxy(req.proxy_url)
     proxy = proxy_url or None
     target = (req.target_url or "").strip() or "https://api.anthropic.com/"
     if not target.startswith(("http://", "https://")):
@@ -174,7 +171,7 @@ async def read_channel(channel_id: int, authorization: str = Header(None)):
 async def patch_channel(channel_id: int, req: ChannelUpdate, authorization: str = Header(None)):
     if not await verify_token(_auth(authorization)):
         raise HTTPException(status_code=401)
-    updates = {k: v for k, v in req.dict().items() if v is not None}
+    updates = {k: v for k, v in req.model_dump().items() if v is not None}
     _sanitize(updates)
     if "name" in updates:
         existing = await get_channel_by_name(updates["name"])

@@ -72,6 +72,16 @@
             <div class="title">OpenAI 转发</div>
             <div class="desc">独立 Key、模型、代理、缓存与思考设置</div>
         </a>
+        <a class="nav-card card-blue" href="/page/codex">
+            <div class="icon" id="icon-codex"></div>
+            <div class="title">Codex 订阅转发</div>
+            <div class="desc">多账号、授权、用量、代理与独立日志</div>
+        </a>
+        <a class="nav-card card-mint" href="/page/claudecode">
+            <div class="icon" id="icon-claudecode"></div>
+            <div class="title">Claude Code 转发</div>
+            <div class="desc">整合 Wanquan 账号、缓存与用量功能</div>
+        </a>
         <a class="nav-card card-pink" href="/page/usage">
             <div class="icon" id="icon-usage"></div>
             <div class="title">用量仪表盘</div>
@@ -100,6 +110,8 @@
     document.getElementById('icon-'+k).innerHTML = ICONS[k];
 });
 document.getElementById('icon-openai').innerHTML = ICONS.channels;
+document.getElementById('icon-codex').innerHTML = ICONS.channels;
+document.getElementById('icon-claudecode').innerHTML = ICONS.channels;
 
 (async function init(){
     try{
