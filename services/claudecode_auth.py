@@ -126,9 +126,6 @@ async def account_info(account_id: int) -> dict:
     account = await claudecode_store.get_account(account_id, decrypt=True)
     if not account:
         raise ValueError("账号不存在")
-    if account.get("access_token") and now < int(account.get("token_expires_at") or 0) - 300:
-        _token_cache[account_id] = (account["access_token"], int(account["token_expires_at"]))
-        return account["access_token"]
     async with httpx.AsyncClient(timeout=30, proxy=account.get("proxy_url") or None) as client:
         data = await _bootstrap(account["credential"], client)
     profile = data["account"]

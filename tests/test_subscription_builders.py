@@ -80,6 +80,45 @@ class SubscriptionBuilderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(effort, "medium")
         self.assertIn("x-anthropic-billing-header", body["system"][0]["text"])
 
+    async def test_claudecode_cache_rules_support_system_and_messages(self):
+        settings = {
+            "claudecode_thinking_alias": "0",
+            "claudecode_cache_mode": "rules",
+            "claudecode_cache_ttl": "1h",
+            "claudecode_cache_rules": json.dumps([
+                {"target": "system", "direction": "backward", "index": 1},
+                {"target": "messages", "direction": "forward", "index": 1},
+                {"target": "messages", "direction": "backward", "index": 1},
+            ]),
+        }
+        raw = {
+            "model": "claude-sonnet-4-6",
+            "system": "system rules",
+            "messages": [
+                {"role": "user", "content": "first"},
+                {"role": "assistant", "content": "last"},
+            ],
+        }
+        with patch(
+            "services.claudecode_request_builder.get_setting",
+            AsyncMock(side_effect=lambda key: settings.get(key)),
+        ):
+            body, _, _ = await prepare_claudecode(raw)
+
+        self.assertIn("x-anthropic-billing-header", body["system"][0]["text"])
+        self.assertEqual(
+            body["system"][1]["cache_control"],
+            {"type": "ephemeral", "ttl": "1h"},
+        )
+        self.assertEqual(
+            body["messages"][0]["content"][-1]["cache_control"],
+            {"type": "ephemeral", "ttl": "1h"},
+        )
+        self.assertEqual(
+            body["messages"][-1]["content"][-1]["cache_control"],
+            {"type": "ephemeral", "ttl": "1h"},
+        )
+
     def test_codex_sse_events_become_chat_chunks(self):
         created = _chat_chunk(
             {"type": "response.created"}, "gpt-5.3-codex", "chatcmpl-test"

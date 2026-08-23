@@ -175,15 +175,20 @@
     codex: {title:'Codex', kicker:'CODEX SUBSCRIPTION', url:'/codex/v1', cacheValues:['off','auto','explicit']},
     claudecode: {title:'Claude Code', kicker:'CLAUDE CODE SUBSCRIPTION', url:'/claudecode/v1', cacheValues:['off','auto','rules']}
   };
+  const usageLabels = {
+    five_hour:'5 小时窗口', five_hour_opus:'5 小时 Opus',
+    seven_day:'周窗口', seven_day_opus:'Opus 周窗口',
+    seven_day_sonnet:'Sonnet 周窗口', seven_day_total:'周总窗口'
+  };
   function usageRows(usage) {
     const windows=[];
     const rate=usage?.rate_limit||{};
     if(rate.primary_window)windows.push(['5 小时窗口',rate.primary_window]);
     if(rate.secondary_window)windows.push(['周窗口',rate.secondary_window]);
     (usage?.additional_rate_limits||[]).forEach(x=>{const name=x.limit_name||x.metered_feature||'独立窗口';if(x.rate_limit?.primary_window)windows.push([name,x.rate_limit.primary_window]);if(x.rate_limit?.secondary_window)windows.push([name,x.rate_limit.secondary_window]);});
-    if(!windows.length&&usage&&typeof usage==='object')for(const [key,value] of Object.entries(usage)){if(value&&typeof value==='object'&&('utilization' in value||'used_percent' in value))windows.push([key,value]);}
+    if(!windows.length&&usage&&typeof usage==='object')for(const [key,value] of Object.entries(usage)){if(value&&typeof value==='object'&&('utilization' in value||'used_percent' in value))windows.push([usageLabels[key]||key,value]);}
     const credits=usage?.credits;const creditRow=credits?`<div class="mini-stat"><span>Credits${credits.unlimited?' · 无限':''}</span><strong>${esc(credits.balance??(credits.has_credits?'可用':'—'))}</strong></div>`:'';const resetCredits=usage?.rate_limit_reset_credits?.available_count!=null?`<div class="mini-stat"><span>窗口重置 Credits</span><strong>${fmt(usage.rate_limit_reset_credits.available_count)}</strong></div>`:'';
-    return (windows.length?windows.map(([name,w])=>{const used=Number(w.used_percent??w.utilization??0);const pct=used<=1?used*100:used;return `<div class="mini-stat"><span>${esc(name)} · 重置 ${date(w.reset_at)}</span><strong>${pct.toFixed(1)}%</strong></div>`}).join(''):'<p class="row-meta">点击刷新用量后显示订阅窗口。</p>')+creditRow+resetCredits;
+    return (windows.length?windows.map(([name,w])=>{const used=Number(w.used_percent??w.utilization??0);const pct=used<=1?used*100:used;return `<div class="mini-stat"><span>${esc(name)} · 重置 ${date(w.reset_at??w.resets_at)}</span><strong>${pct.toFixed(1)}%</strong></div>`}).join(''):'<p class="row-meta">点击刷新用量后显示订阅窗口。</p>')+creditRow+resetCredits;
   }
   function codexAccountSummary(account, usage=account?.usage||{}) {
     const plan=usage?.plan_type||account?.subscription_type||'待识别';
@@ -203,12 +208,12 @@
         <div class="toggle-row"><div class="toggle-copy"><strong>启用转发</strong><p>客户端密码使用全局访问密钥。</p></div><label class="switch"><input id="sub-enabled" type="checkbox" ${Number(c.enabled)?'checked':''}><span></span></label></div>
         <div class="toggle-row"><div class="toggle-copy"><strong>思考后缀</strong><p>识别 -thinking[-low/medium/high/xhigh]。</p></div><label class="switch"><input id="sub-thinking" type="checkbox" ${Number(c.thinking_alias)?'checked':''}><span></span></label></div>
         ${kind==='claudecode'?`<label class="field"><span>单账号 RPM 上限</span><input id="sub-rpm" type="number" min="0" value="${esc(c.rpm_limit||0)}"><small>0 表示不限制。</small></label>`:''}
-      </div></section><aside class="panel"><div class="panel-head"><h3>缓存断点</h3><span>最多 4 条</span></div><div class="panel-body stack"><label class="field"><span>缓存模式</span><select id="sub-cache">${meta.cacheValues.map(x=>`<option value="${x}" ${x===mode?'selected':''}>${x==='off'?'关闭':x==='auto'?'自动':'自定义断点'}</option>`).join('')}</select></label>${kind==='claudecode'?`<label class="field"><span>缓存 TTL</span><select id="sub-ttl"><option value="5m">5 分钟</option><option value="1h">1 小时</option></select></label>`:`<label class="field"><span>Prompt cache key</span><input id="sub-cache-key" value="${esc(c.cache_key||'')}" placeholder="可留空"></label>`}<div id="sub-rules"></div><button class="btn" id="sub-add-rule" data-add-rule type="button">＋ 添加断点</button></div></aside></div>
+      </div></section><aside class="panel"><div class="panel-head"><h3>缓存断点</h3><span>最多 4 条</span></div><div class="panel-body stack"><label class="field"><span>缓存模式</span><select id="sub-cache">${meta.cacheValues.map(x=>`<option value="${x}" ${x===mode?'selected':''}>${x==='off'?'关闭':x==='auto'?'自动':'自定义断点'}</option>`).join('')}</select></label>${kind==='claudecode'?`<label class="field"><span>缓存 TTL</span><select id="sub-ttl"><option value="5m">5 分钟</option><option value="1h">1 小时</option></select></label>`:`<label class="field"><span>Prompt cache key</span><input id="sub-cache-key" value="${esc(c.cache_key||'')}" placeholder="可留空"></label>`}<div id="sub-rules"></div><button class="btn" id="sub-add-rule" data-add-rule type="button">＋ 添加断点</button>${kind==='claudecode'?'<p class="row-meta">每条规则可选择 system 或 messages，并设置正数或倒数位置。</p>':''}</div></aside></div>
       <div class="section-title"><h2>账号</h2><button class="btn primary" id="sub-add">＋ 添加账号</button></div><div class="quiet-list panel" id="sub-accounts">${accounts.length?accounts.map(a=>`<div class="quiet-row sub-account" data-id="${a.id}"><div><div class="row-title">${esc(a.name)} ${a.email?'· '+esc(a.email):''}</div><div class="row-sub">${esc(a.subscription_type||'待识别')} · ${a.proxy_url?'已配置代理':'直连'}${a.disable_reason?' · '+esc(a.disable_reason):''}</div></div><div class="row-meta">${kind==='codex'?(a.authenticated?'已授权':'未授权'):(a.credential_configured?'已录入':'未录入')}</div><span class="status ${Number(a.is_active)?'on':'warn'}">${Number(a.is_active)?'启用':'停用'}</span><span class="row-arrow">›</span></div>`).join(''):'<div class="empty"><strong>还没有账号</strong>添加账号后才能转发。</div>'}</div></div>`;
     app.querySelector('.section-title h2').textContent='账号与独立代理';
     document.getElementById('sub-add').textContent='＋ 添加账号与代理';
-    if(kind==='claudecode')document.getElementById('sub-ttl').value=c.cache_ttl||'5m';renderRuleBuilder('sub-rules',rules,false);
-    document.getElementById('sub-add-rule').onclick=()=>{if(rules.length<4){rules.push({direction:'backward',index:2});renderRuleBuilder('sub-rules',rules,false)}};
+    if(kind==='claudecode')document.getElementById('sub-ttl').value=c.cache_ttl||'5m';renderRuleBuilder('sub-rules',rules,kind==='claudecode');
+    document.getElementById('sub-add-rule').onclick=()=>{if(rules.length<4){rules.push(kind==='claudecode'?{target:'messages',direction:'backward',index:2}:{direction:'backward',index:2});renderRuleBuilder('sub-rules',rules,kind==='claudecode')}};
     document.getElementById('sub-save').onclick=async()=>{const payload={enabled:checked('sub-enabled'),models:JSON.stringify(lines(formValue('sub-models'))),thinking_alias:checked('sub-thinking'),cache_mode:formValue('sub-cache'),cache_rules:JSON.stringify(rules)};if(kind==='codex')payload.cache_key=formValue('sub-cache-key').trim();else{payload.cache_ttl=formValue('sub-ttl');payload.rpm_limit=Number(formValue('sub-rpm')||0)}try{await api(`/api/${kind}/config`,{method:'PATCH',body:JSON.stringify(payload)});toast(`${meta.title} 配置已保存`);await subscriptionPage(kind)}catch(e){toast(e.message,true)}};
     document.getElementById('sub-add').onclick=()=>subscriptionAccountDrawer(kind,null);document.querySelectorAll('.sub-account').forEach(x=>x.onclick=()=>subscriptionAccountDrawer(kind,accounts.find(a=>a.id===Number(x.dataset.id))));
   }
