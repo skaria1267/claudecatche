@@ -10,7 +10,7 @@ from services import codex_store
 
 
 CODEX_BASE = "https://chatgpt.com/backend-api/codex"
-CODEX_VERSION = "0.147.0"
+CODEX_VERSION = "0.157.0"
 USER_AGENT = f"codex_exec/{CODEX_VERSION} (Debian 13.0.0; x86_64) xterm-256color (codex_exec; {CODEX_VERSION})"
 FAILURES: deque = deque(maxlen=50)
 
