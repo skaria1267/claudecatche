@@ -15,7 +15,7 @@ TOKEN_URL = f"{CLAUDE_BASE}/v1/oauth/token"
 REDIRECT_URI = "https://console.anthropic.com/oauth/code/callback"
 ANTHROPIC_VERSION = "2023-06-01"
 ANTHROPIC_BETA = "oauth-2025-04-20"
-CLAUDE_CODE_VERSION = "2.1.76"
+CLAUDE_CODE_VERSION = "2.1.280"
 CLAUDE_CODE_UA = f"claude-code/{CLAUDE_CODE_VERSION}"
 CLAUDE_CODE_BILLING_SALT = "59cf53e54c78"
 
