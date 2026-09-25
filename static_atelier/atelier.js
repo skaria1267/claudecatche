@@ -198,6 +198,65 @@
     const list=Array.isArray(raw)?raw:models(raw);
     return list.length?`<div class="model-summary">${list.map(model=>`<span class="model-chip">${esc(model)}</span>`).join('')}</div>`:'<p class="row-meta">点击拉取模型后显示账号可用模型。</p>';
   }
+  async function claudeVersionPanel(accounts) {
+    const root=document.getElementById('cc-version-panel');
+    if(!root)return;
+    try {
+      const data=await api('/api/claudecode/client-version');
+      if(!root.isConnected)return;
+      let profile=data.profile,release=data.release;
+      root.innerHTML=`<div class="setting-section-title"><h3>客户端版本</h3><span id="cc-version-current"></span></div>
+        <div class="form-grid"><label class="field"><span>候选版本</span><input id="cc-version-input" value="${esc(profile.version)}" maxlength="16" inputmode="decimal" placeholder="2.1.280"></label>
+        <label class="field"><span>User-Agent</span><input id="cc-version-ua" readonly value="${esc('claude-code/'+profile.version)}"></label>
+        <label class="field"><span>测试账号</span><select id="cc-version-account"><option value="">请选择账号</option>${accounts.map(a=>`<option value="${a.id}">${esc(a.name)}${Number(a.is_active)?'':'（停用）'}</option>`).join('')}</select></label>
+        <label class="field"><span>测试模型</span><input id="cc-version-model" list="cc-version-model-list" placeholder="填写实际使用的模型名"><datalist id="cc-version-model-list">${lines(formValue('sub-models')).map(m=>`<option value="${esc(m)}"></option>`).join('')}</datalist></label></div>
+        <div class="inline-actions" style="margin-top:14px"><button class="btn" id="cc-version-check" type="button">检查最新版</button><button class="btn" id="cc-version-use-latest" type="button" disabled>填入最新版</button><span class="row-meta" id="cc-version-release"></span></div>
+        <p class="row-meta" id="cc-version-tested"></p><p class="row-meta">测试会向所选账号发送一条短请求，并消耗少量额度。</p>
+        <div class="inline-actions"><button class="btn primary" id="cc-version-test" type="button">测试并应用</button><button class="btn" id="cc-version-save" type="button">直接保存</button><button class="btn" id="cc-version-restore" type="button">恢复上一版本</button></div>
+        <p class="row-meta" id="cc-version-status" role="status"></p>`;
+      const el=id=>root.querySelector('#cc-version-'+id);
+      const active=accounts.find(a=>Number(a.is_active))||accounts[0];
+      if(active)el('account').value=String(active.id);
+      el('model').value=lines(formValue('sub-models'))[0]||'';
+      const renderState=()=>{
+        el('current').textContent='当前生效 '+profile.version;
+        el('tested').textContent=profile.tested_at?`此版本测试通过 · ${profile.tested_model} · ${date(profile.tested_at)}`:'当前版本暂无已保存的测试记录';
+        el('restore').disabled=!profile.previous;
+        el('restore').textContent=profile.previous?`恢复 ${profile.previous.version}`:'恢复上一版本';
+        el('release').textContent=[release.version?'官方最新 '+release.version:'尚未获取最新版本',release.checked_at?'检查于 '+date(release.checked_at):'',release.error||''].filter(Boolean).join(' · ');
+        el('use-latest').disabled=!release.version;
+      };
+      const syncUA=()=>{el('ua').value='claude-code/'+el('input').value.trim()};
+      el('input').oninput=syncUA;
+      let busy=false;
+      const run=async(task)=>{
+        if(busy)return;busy=true;
+        root.querySelectorAll('button,input,select').forEach(x=>x.disabled=true);
+        el('status').textContent='处理中…';el('status').style.color='';
+        try{el('status').textContent=await task()}
+        catch(e){el('status').textContent=e.message;el('status').style.color='var(--danger)'}
+        finally{busy=false;if(root.isConnected){root.querySelectorAll('button,input,select').forEach(x=>x.disabled=false);renderState()}}
+      };
+      const check=async(force)=>{
+        release=await api('/api/claudecode/client-version/check',{method:'POST',body:JSON.stringify({force,account_id:Number(el('account').value)||null})});
+        return release.error||'版本检查完成';
+      };
+      el('check').onclick=()=>run(()=>check(true));
+      el('use-latest').onclick=()=>{el('input').value=release.version;syncUA()};
+      const apply=async(action)=>{
+        const payload={version:action==='restore'?profile.previous.version:el('input').value.trim(),expected_version:profile.version};
+        if(action==='test'){payload.account_id=Number(el('account').value);payload.model=el('model').value.trim();if(!payload.account_id||!payload.model)throw new Error('请选择测试账号并填写模型')}
+        profile=await api('/api/claudecode/client-version/'+action,{method:'POST',body:JSON.stringify(payload)});
+        el('input').value=profile.version;syncUA();
+        return action==='test'?'测试通过，版本已应用':action==='restore'?'已恢复上一版本':'版本已保存，下一次请求生效';
+      };
+      el('save').onclick=()=>run(()=>apply('apply'));
+      el('test').onclick=()=>run(()=>apply('test'));
+      el('restore').onclick=()=>run(()=>apply('restore'));
+      renderState();
+      if(Date.now()/1000-(release.checked_at||0)>=86400)await run(()=>check(false));
+    } catch(e){if(root.isConnected)root.textContent='版本配置加载失败：'+e.message}
+  }
   async function subscriptionPage(kind) {
     const meta=subscriptionMeta[kind];const [c,accounts]=await Promise.all([api(`/api/${kind}/config`),api(`/api/${kind}/accounts`)]);let rules;try{rules=JSON.parse(c.cache_rules||'[]')}catch(_){rules=[]}
     const mode=c.cache_mode||'off';
@@ -209,6 +268,7 @@
         <div class="toggle-row"><div class="toggle-copy"><strong>思考后缀</strong><p>识别 -thinking[-low/medium/high/xhigh]。</p></div><label class="switch"><input id="sub-thinking" type="checkbox" ${Number(c.thinking_alias)?'checked':''}><span></span></label></div>
         ${kind==='claudecode'?`<label class="field"><span>单账号 RPM 上限</span><input id="sub-rpm" type="number" min="0" value="${esc(c.rpm_limit||0)}"><small>0 表示不限制。</small></label>`:''}
       </div></section><aside class="panel"><div class="panel-head"><h3>缓存断点</h3><span>最多 4 条</span></div><div class="panel-body stack"><label class="field"><span>缓存模式</span><select id="sub-cache">${meta.cacheValues.map(x=>`<option value="${x}" ${x===mode?'selected':''}>${x==='off'?'关闭':x==='auto'?'自动':'自定义断点'}</option>`).join('')}</select></label>${kind==='claudecode'?`<label class="field"><span>缓存 TTL</span><select id="sub-ttl"><option value="5m">5 分钟</option><option value="1h">1 小时</option></select></label>`:`<label class="field"><span>Prompt cache key</span><input id="sub-cache-key" value="${esc(c.cache_key||'')}" placeholder="可留空"></label>`}<div id="sub-rules"></div><button class="btn" id="sub-add-rule" data-add-rule type="button">＋ 添加断点</button>${kind==='claudecode'?'<p class="row-meta">每条规则可选择 system 或 messages，并设置正数或倒数位置。</p>':''}</div></aside></div>
+      ${kind==='claudecode'?'<section class="setting-section" id="cc-version-panel" aria-label="客户端版本"></section>':''}
       <div class="section-title"><h2>账号</h2><button class="btn primary" id="sub-add">＋ 添加账号</button></div><div class="quiet-list panel" id="sub-accounts">${accounts.length?accounts.map(a=>`<div class="quiet-row sub-account" data-id="${a.id}"><div><div class="row-title">${esc(a.name)} ${a.email?'· '+esc(a.email):''}</div><div class="row-sub">${esc(a.subscription_type||'待识别')} · ${a.proxy_url?'已配置代理':'直连'}${a.disable_reason?' · '+esc(a.disable_reason):''}</div></div><div class="row-meta">${kind==='codex'?(a.authenticated?'已授权':'未授权'):(a.credential_configured?'已录入':'未录入')}</div><span class="status ${Number(a.is_active)?'on':'warn'}">${Number(a.is_active)?'启用':'停用'}</span><span class="row-arrow">›</span></div>`).join(''):'<div class="empty"><strong>还没有账号</strong>添加账号后才能转发。</div>'}</div></div>`;
     app.querySelector('.section-title h2').textContent='账号与独立代理';
     document.getElementById('sub-add').textContent='＋ 添加账号与代理';
@@ -216,6 +276,7 @@
     document.getElementById('sub-add-rule').onclick=()=>{if(rules.length<4){rules.push(kind==='claudecode'?{target:'messages',direction:'backward',index:2}:{direction:'backward',index:2});renderRuleBuilder('sub-rules',rules,kind==='claudecode')}};
     document.getElementById('sub-save').onclick=async()=>{const payload={enabled:checked('sub-enabled'),models:JSON.stringify(lines(formValue('sub-models'))),thinking_alias:checked('sub-thinking'),cache_mode:formValue('sub-cache'),cache_rules:JSON.stringify(rules)};if(kind==='codex')payload.cache_key=formValue('sub-cache-key').trim();else{payload.cache_ttl=formValue('sub-ttl');payload.rpm_limit=Number(formValue('sub-rpm')||0)}try{await api(`/api/${kind}/config`,{method:'PATCH',body:JSON.stringify(payload)});toast(`${meta.title} 配置已保存`);await subscriptionPage(kind)}catch(e){toast(e.message,true)}};
     document.getElementById('sub-add').onclick=()=>subscriptionAccountDrawer(kind,null);document.querySelectorAll('.sub-account').forEach(x=>x.onclick=()=>subscriptionAccountDrawer(kind,accounts.find(a=>a.id===Number(x.dataset.id))));
+    if(kind==='claudecode')await claudeVersionPanel(accounts);
   }
   function subscriptionAuthPanel(kind,id) {
     if(!id)return '';

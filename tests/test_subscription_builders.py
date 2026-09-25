@@ -12,6 +12,11 @@ from services.proxy_config import normalize_proxy_url
 
 
 class SubscriptionBuilderTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        settings = patch("services.claudecode_client.get_setting", AsyncMock(return_value=None))
+        settings.start()
+        self.addCleanup(settings.stop)
+
     async def test_codex_chat_conversion_thinking_cache_and_tools(self):
         settings = {
             "codex_thinking_alias": "1",

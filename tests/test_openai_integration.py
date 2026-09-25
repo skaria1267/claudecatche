@@ -1,11 +1,8 @@
 import os
+import tempfile
 import unittest
+from unittest.mock import patch
 
-
-TEST_DB = os.path.join(os.path.dirname(__file__), "openai-test.db")
-os.environ["DB_PATH"] = TEST_DB
-os.environ["ADMIN_PASSWORD"] = "test-admin"
-os.environ["ACCESS_KEY"] = "test-access"
 
 import httpx
 
@@ -18,8 +15,16 @@ from services.upstream import clear_failures, get_recent_failures
 
 class OpenAIIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        if os.path.exists(TEST_DB):
-            os.unlink(TEST_DB)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        for target, value in (
+            ("database.DB_PATH", os.path.join(tmp.name, "openai-test.db")),
+            ("config.INIT_ADMIN_PASSWORD", "test-admin"),
+            ("config.INIT_ACCESS_KEY", "test-access"),
+        ):
+            setting = patch(target, value)
+            setting.start()
+            self.addCleanup(setting.stop)
         await init_db()
         self.client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -35,8 +40,6 @@ class OpenAIIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         await self.client.aclose()
-        if os.path.exists(TEST_DB):
-            os.unlink(TEST_DB)
 
     async def test_config_is_secret_safe_and_public_models_route_is_specific(self):
         response = await self.client.patch(

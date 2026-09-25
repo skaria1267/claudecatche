@@ -5,11 +5,8 @@ import re
 
 from models import get_setting
 from services.cache_inject import inject_cache_breakpoints
-from services.claudecode_auth import (
-    CLAUDE_CODE_BILLING_SALT,
-    CLAUDE_CODE_UA,
-    CLAUDE_CODE_VERSION,
-)
+from services.claudecode_auth import CLAUDE_CODE_BILLING_SALT
+from services.claudecode_client import current_version
 
 
 ALLOWED_KEYS = {
@@ -57,15 +54,15 @@ def _first_user_sample(body: dict) -> str:
     return ""
 
 
-def _billing(body: dict) -> str:
+def _billing(body: dict, version: str) -> str:
     digest = hashlib.sha256(
-        f"{CLAUDE_CODE_BILLING_SALT}{_first_user_sample(body)}{CLAUDE_CODE_VERSION}".encode()
+        f"{CLAUDE_CODE_BILLING_SALT}{_first_user_sample(body)}{version}".encode()
     ).hexdigest()[:3]
-    return f"cc_version={CLAUDE_CODE_VERSION}.{digest}; cc_entrypoint=cli; cch=00000;"
+    return f"cc_version={version}.{digest}; cc_entrypoint=cli; cch=00000;"
 
 
-def _inject_billing(body: dict) -> None:
-    block = {"type": "text", "text": f"x-anthropic-billing-header: {_billing(body)}"}
+def _inject_billing(body: dict, version: str) -> None:
+    block = {"type": "text", "text": f"x-anthropic-billing-header: {_billing(body, version)}"}
     system = body.get("system")
     if system is None:
         body["system"] = [block]
@@ -76,6 +73,7 @@ def _inject_billing(body: dict) -> None:
 
 
 async def prepare(raw_body: dict) -> tuple[dict, str, str]:
+    version = await current_version()
     body = copy.deepcopy(raw_body)
     effort = ""
     if (await get_setting("claudecode_thinking_alias") or "1") == "1":
@@ -104,5 +102,5 @@ async def prepare(raw_body: dict) -> tuple[dict, str, str]:
     for key in ("top_k", "top_p", "temperature"):
         if body.get(key) in (None, 0):
             body.pop(key, None)
-    _inject_billing(body)
-    return body, CLAUDE_CODE_UA, effort
+    _inject_billing(body, version)
+    return body, f"claude-code/{version}", effort

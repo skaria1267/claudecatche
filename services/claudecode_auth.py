@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 
 from services import claudecode_store
+from services.claudecode_client import DEFAULT_VERSION, current_version
 
 
 CLAUDE_BASE = "https://api.anthropic.com"
@@ -15,18 +16,18 @@ TOKEN_URL = f"{CLAUDE_BASE}/v1/oauth/token"
 REDIRECT_URI = "https://console.anthropic.com/oauth/code/callback"
 ANTHROPIC_VERSION = "2023-06-01"
 ANTHROPIC_BETA = "oauth-2025-04-20"
-CLAUDE_CODE_VERSION = "2.1.280"
+CLAUDE_CODE_VERSION = DEFAULT_VERSION
 CLAUDE_CODE_UA = f"claude-code/{CLAUDE_CODE_VERSION}"
 CLAUDE_CODE_BILLING_SALT = "59cf53e54c78"
 
 _token_cache: dict[int, tuple[str, int]] = {}
 
 
-def headers(cookie: str = "") -> dict:
+async def headers(cookie: str = "") -> dict:
     result = {
         "anthropic-version": ANTHROPIC_VERSION,
         "anthropic-beta": ANTHROPIC_BETA,
-        "user-agent": CLAUDE_CODE_UA,
+        "user-agent": f"claude-code/{await current_version()}",
     }
     if cookie:
         value = cookie.strip()
@@ -45,7 +46,7 @@ def _pkce() -> tuple[str, str]:
 
 
 async def _bootstrap(cookie: str, client: httpx.AsyncClient) -> dict:
-    response = await client.get(f"{CLAUDE_BASE}/api/bootstrap", headers=headers(cookie))
+    response = await client.get(f"{CLAUDE_BASE}/api/bootstrap", headers=await headers(cookie))
     response.raise_for_status()
     data = response.json()
     if not data.get("account"):
@@ -75,7 +76,7 @@ async def _authorize(cookie: str, organization_id: str,
         "state": state,
         "organization_uuid": organization_id,
     }
-    request_headers = headers(cookie)
+    request_headers = await headers(cookie)
     request_headers["content-type"] = "application/json"
     response = await client.post(
         f"{CLAUDE_BASE}/v1/oauth/{organization_id}/authorize",
@@ -103,7 +104,7 @@ async def _exchange(code: str, verifier: str, state: str,
     }
     if state:
         payload["state"] = state
-    response = await client.post(TOKEN_URL, headers=headers(), json=payload)
+    response = await client.post(TOKEN_URL, headers=await headers(), json=payload)
     response.raise_for_status()
     return response.json()
 
@@ -111,7 +112,7 @@ async def _exchange(code: str, verifier: str, state: str,
 async def _refresh(refresh_token: str, client: httpx.AsyncClient) -> dict:
     response = await client.post(
         TOKEN_URL,
-        headers=headers(),
+        headers=await headers(),
         json={
             "grant_type": "refresh_token",
             "client_id": CLIENT_ID,
@@ -194,7 +195,7 @@ async def account_usage(account_id: int) -> dict:
     async with httpx.AsyncClient(timeout=30, proxy=account.get("proxy_url") or None) as client:
         response = await client.get(
             f"{CLAUDE_BASE}/api/oauth/usage",
-            headers={**headers(), "Authorization": f"Bearer {token}"},
+            headers={**await headers(), "Authorization": f"Bearer {token}"},
         )
     response.raise_for_status()
     data = response.json()
