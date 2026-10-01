@@ -6,13 +6,11 @@ from collections import deque
 import httpx
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from services import codex_store
+from services import codex_client, codex_store
 
 
 CODEX_BASE = "https://chatgpt.com/backend-api/codex"
 RESET_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
-CODEX_VERSION = "0.157.0"
-USER_AGENT = f"codex_exec/{CODEX_VERSION} (Debian 13.0.0; x86_64) xterm-256color (codex_exec; {CODEX_VERSION})"
 FAILURES: deque = deque(maxlen=50)
 
 
@@ -33,11 +31,11 @@ def _failure(account: dict, body: dict, streaming: bool, status=None, text="", e
     })
 
 
-def headers(token: str, account_uid: str, accept: str = "text/event-stream") -> dict:
+def headers(token: str, account_uid: str, accept: str = "text/event-stream", *, version: str) -> dict:
     session_id = str(uuid.uuid4())
     result = {
         "Authorization": f"Bearer {token}", "Content-Type": "application/json",
-        "Accept": accept, "User-Agent": USER_AGENT, "originator": "codex_exec",
+        "Accept": accept, "User-Agent": codex_client.user_agent(version), "originator": "codex_exec",
         "session-id": session_id, "x-client-request-id": session_id,
     }
     if account_uid:
@@ -46,10 +44,11 @@ def headers(token: str, account_uid: str, accept: str = "text/event-stream") -> 
 
 
 async def fetch_models(token: str, account: dict) -> list[str]:
+    version = await codex_client.current_version()
     async with httpx.AsyncClient(timeout=30, proxy=account.get("proxy_url") or None) as client:
         response = await client.get(
-            f"{CODEX_BASE}/models?client_version={CODEX_VERSION}",
-            headers=headers(token, account.get("account_uid") or "", "application/json"),
+            f"{CODEX_BASE}/models?client_version={version}",
+            headers=headers(token, account.get("account_uid") or "", "application/json", version=version),
         )
     if response.status_code >= 400:
         raise RuntimeError(f"Codex 模型拉取失败 HTTP {response.status_code}: {response.text[:300]}")
@@ -67,7 +66,8 @@ async def fetch_usage(token: str, account: dict) -> dict:
     async with httpx.AsyncClient(timeout=30, proxy=account.get("proxy_url") or None) as client:
         response = await client.get(
             "https://chatgpt.com/backend-api/wham/usage",
-            headers=headers(token, account.get("account_uid") or "", "application/json"),
+            headers=headers(token, account.get("account_uid") or "", "application/json",
+                            version=await codex_client.current_version()),
         )
     if response.status_code >= 400:
         raise RuntimeError(f"Codex 用量刷新失败 HTTP {response.status_code}: {response.text[:300]}")
@@ -78,7 +78,8 @@ async def fetch_reset_credits(token: str, account: dict) -> dict:
     async with httpx.AsyncClient(timeout=30, proxy=account.get("proxy_url") or None) as client:
         response = await client.get(
             RESET_CREDITS_URL,
-            headers=headers(token, account.get("account_uid") or "", "application/json"),
+            headers=headers(token, account.get("account_uid") or "", "application/json",
+                            version=await codex_client.current_version()),
         )
     if response.status_code >= 400:
         raise RuntimeError(f"Codex 重置卡查询失败 HTTP {response.status_code}: {response.text[:300]}")
@@ -105,7 +106,8 @@ async def consume_reset_credit(token: str, account: dict, credit_id: str) -> dic
     async with httpx.AsyncClient(timeout=30, proxy=account.get("proxy_url") or None) as client:
         response = await client.post(
             f"{RESET_CREDITS_URL}/consume",
-            headers=headers(token, account.get("account_uid") or "", "application/json"),
+            headers=headers(token, account.get("account_uid") or "", "application/json",
+                            version=await codex_client.current_version()),
             json={"credit_id": credit_id, "redeem_request_id": redeem_id},
         )
     if response.status_code >= 400:
@@ -174,7 +176,8 @@ async def forward(body: dict, downstream_stream: bool, token: str, account: dict
         response = await client.send(
             client.build_request(
                 "POST", f"{CODEX_BASE}/responses",
-                headers=headers(token, account.get("account_uid") or ""), json=body,
+                headers=headers(token, account.get("account_uid") or "",
+                                version=await codex_client.current_version()), json=body,
             ), stream=True,
         )
         if response.status_code >= 400:

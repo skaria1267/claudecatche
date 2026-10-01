@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from models import get_setting, set_setting
 from routers.auth import verify_token
-from services import codex_store
+from services import codex_client, codex_store
 from services.codex_auth import (
     authcode_complete, authcode_start, device_poll, device_start, valid_token,
 )
@@ -77,6 +77,16 @@ class ResetCreditConsume(BaseModel):
     credit_id: str
 
 
+class VersionChange(BaseModel):
+    version: str
+    expected_version: str
+
+
+class ReleaseCheck(BaseModel):
+    force: bool = False
+    account_id: int | None = None
+
+
 class ConfigUpdate(BaseModel):
     enabled: int | None = None
     models: str | None = None
@@ -85,6 +95,42 @@ class ConfigUpdate(BaseModel):
     cache_key: str | None = None
     cache_rules: str | None = None
     allow_unlisted_models: int | None = None
+
+
+@router.get("/api/codex/client-version")
+async def client_version(authorization: str = Header(None)):
+    await _admin(authorization)
+    return {"profile": await codex_client.profile(), "release": await codex_client.release_status()}
+
+
+@router.post("/api/codex/client-version/check")
+async def check_client_version(req: ReleaseCheck, authorization: str = Header(None)):
+    await _admin(authorization)
+    proxy = ""
+    if req.account_id is not None:
+        account = await codex_store.get_account(req.account_id)
+        if not account:
+            raise HTTPException(status_code=404, detail="账号不存在")
+        proxy = account.get("proxy_url") or ""
+    return await codex_client.check_release(req.force, proxy)
+
+
+@router.post("/api/codex/client-version/apply")
+async def apply_client_version(req: VersionChange, authorization: str = Header(None)):
+    await _admin(authorization)
+    try:
+        return await codex_client.save_version(req.version, req.expected_version)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/codex/client-version/restore")
+async def restore_client_version(req: VersionChange, authorization: str = Header(None)):
+    await _admin(authorization)
+    try:
+        return await codex_client.save_version(req.version, req.expected_version, restore=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/api/codex/config")

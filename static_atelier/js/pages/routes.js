@@ -181,7 +181,7 @@ async function subscriptionView(ctx, kind) {
     ${summary ? `<div class="metrics">${metric('累计请求', summary.total_requests)}${metric('输入', summary.total_input)}${metric('输出', summary.total_output)}${metric('缓存读取', summary.total_cache_read)}</div>` : ''}
     <div class="section-head row"><div><h2>账号</h2><p>请求会在可用账号之间轮换。点击账号查看额度、代理和授权。</p></div><button class="btn primary" type="button" id="sub-add">${icon('plus')}添加账号</button></div>
     <div class="item-list" id="sub-accounts"></div>
-    ${isCC ? '<div id="cc-version"></div>' : ''}
+    ${isCC ? '<div id="cc-version"></div>' : '<div id="cx-version"></div>'}
     <div class="section-head"><h2>转发设置</h2><p>对所有账号生效。修改后点底部的「保存」。</p></div>
     <div class="form-page" id="sub-form"><div class="col">
       ${card('模型', modelEditor('sub-models', parseModels(c.models)) + (kind === 'codex' ? toggleRow('sub-unlisted', '允许列表外的模型', '关闭后，客户端只能使用上面列出的模型。', (c.allow_unlisted_models ?? '1') !== '0') : ''), {iconName: 'layers', sub: kind === 'codex' ? '可在账号详情里拉取账号可用模型作参考' : '客户端可使用的模型列表'})}
@@ -208,6 +208,7 @@ async function subscriptionView(ctx, kind) {
   };
   watchForm($('#sub-form'), state, () => patch(`/api/${kind}/config`, state()));
   if (isCC) versionRow(accounts, () => getModels('sub-models'));
+  else codexVersionRow(accounts);
   const hash = ctx.hash.match(/^acc-(\d+)$/);
   if (hash) { history.replaceState(null, '', ctx.path); const a = accounts.find(x => x.id === Number(hash[1])); if (a) accountSheet(ctx, kind, a); }
 }
@@ -444,6 +445,65 @@ const modelChips = raw => {
   const list = parseModels(raw);
   return list.length ? `<p class="hint">账号可用模型</p><div class="chips readonly">${list.map(m => `<span class="chip">${esc(m)}</span>`).join('')}</div>` : '<p class="hint">点「拉取可用模型」查看这个账号能用哪些模型。</p>';
 };
+
+/* ---------------- Codex 客户端版本 ---------------- */
+
+async function codexVersionRow(accounts) {
+  const root = $('#cx-version'); if (!root) return;
+  let data;
+  try { data = await api('/api/codex/client-version'); }
+  catch (e) { if (root.isConnected) root.innerHTML = `<div class="notice">${icon('alert')}<div>客户端版本读取失败：${esc(e.message)}</div></div>`; return; }
+  let {profile, release} = data;
+  const active = accounts.find(a => on(a.is_active)) || accounts[0];
+  const check = async accountId => {
+    release = await post('/api/codex/client-version/check', {force: true, account_id: accountId || null});
+    paint();
+    if (release.error) throw new Error(release.error);
+    return `已获取官方稳定版 ${release.version}`;
+  };
+  const apply = async (version, restore = false) => {
+    profile = await post(`/api/codex/client-version/${restore ? 'restore' : 'apply'}`, {version, expected_version: profile.version});
+    paint();
+    return `版本 ${profile.version} 已应用，下一次请求生效`;
+  };
+  const paint = () => {
+    if (!root.isConnected) return;
+    const canApply = release.version && !release.error && release.version !== profile.version;
+    root.innerHTML = `<section class="card version-card"><div class="version-main"><span class="card-ico">${icon('terminal')}</span><div><strong>Codex 请求版本 ${esc(profile.version)}</strong><p>${esc(release.error || (release.version ? `官方稳定版 ${release.version}` : '尚未获取官方最新版本'))}</p></div></div>
+      <div class="row-actions"><button class="btn small" type="button" id="cx-version-check">${icon('refresh')}获取最新版</button><button class="btn small primary" type="button" id="cx-version-apply" ${canApply ? '' : 'disabled'}>${icon('check')}应用最新版</button><button class="btn small" type="button" id="cx-version-open">管理${icon('chevron')}</button></div></section>`;
+    $('#cx-version-check', root).onclick = e => busy(e.currentTarget, () => check(active?.id));
+    $('#cx-version-apply', root).onclick = e => busy(e.currentTarget, () => apply(release.version));
+    $('#cx-version-open', root).onclick = openVersion;
+  };
+  const openVersion = () => {
+    const sheet = openSheet(`${sheetHead('Codex', '客户端版本')}
+      <div class="sheet-body"><div class="kv"><div><span>当前生效</span><strong id="cv-current"></strong></div><div><span>官方稳定版</span><strong id="cv-latest"></strong></div><div><span>上次获取</span><strong id="cv-checked"></strong></div></div>
+        <section class="form-section"><h4>官方版本</h4>${field('获取更新使用的连接', `<select id="cv-account"><option value="">服务器直连</option>${accounts.map(a => `<option value="${a.id}">${esc(a.name)}${a.proxy_url ? '（独立代理）' : '（直连）'}</option>`).join('')}</select>`)}
+          <div class="row-actions"><button class="btn small" type="button" id="cv-check">${icon('refresh')}获取最新版</button><button class="btn small" type="button" id="cv-fill">填入最新版</button></div></section>
+        <section class="form-section"><h4>应用版本</h4>${field('版本号', '<input id="cv-input" maxlength="16" inputmode="decimal" spellcheck="false">')}
+          <div class="row-actions"><button class="btn primary" type="button" id="cv-save">${icon('check')}保存并应用</button><button class="btn" type="button" id="cv-restore">${icon('history')}<span>恢复上一版本</span></button></div>
+          <div class="hint" id="cv-status" role="status"></div></section></div>`);
+    const input = $('#cv-input', sheet);
+    input.value = profile.version;
+    $('#cv-account', sheet).value = active ? String(active.id) : '';
+    const state = () => {
+      if (!sheet.contains(input)) return;
+      $('#cv-current', sheet).textContent = profile.version;
+      $('#cv-latest', sheet).textContent = release.error || release.version || '未获取';
+      $('#cv-checked', sheet).textContent = release.checked_at ? date(release.checked_at) : '未获取';
+      $('#cv-fill', sheet).disabled = !release.version || !!release.error;
+      $('#cv-restore', sheet).disabled = !profile.previous;
+      $('#cv-restore span', sheet).textContent = profile.previous ? `恢复到 ${profile.previous}` : '恢复上一版本';
+    };
+    const run = (button, task) => busy(button, async () => { try { return await task(); } finally { state(); } }, $('#cv-status', sheet));
+    $('#cv-check', sheet).onclick = e => run(e.currentTarget, () => check(Number($('#cv-account', sheet).value)));
+    $('#cv-fill', sheet).onclick = () => { input.value = release.version; };
+    $('#cv-save', sheet).onclick = e => run(e.currentTarget, () => apply(input.value.trim()));
+    $('#cv-restore', sheet).onclick = e => run(e.currentTarget, async () => { const message = await apply(profile.previous, true); input.value = profile.version; return message; });
+    state();
+  };
+  paint();
+}
 
 /* ---------------- Claude Code 客户端版本 ---------------- */
 
