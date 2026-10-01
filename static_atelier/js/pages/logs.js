@@ -49,8 +49,8 @@ async function requestsView(ctx, source, filters) {
     const status = segValue('log-status');
     const list = rows.filter(r => status === 'all' || (status === 'ok') === ok(r.status));
     const whoLabel = source === 'main' ? '渠道' : '账号';
-    content.innerHTML = list.length ? `<div class="card table-card"><div class="table-scroll"><table class="log-table"><thead><tr><th>时间</th><th>${whoLabel}</th><th>模型</th><th class="num">输入</th><th class="num">输出</th><th class="num">缓存</th><th class="num">耗时</th><th>状态</th></tr></thead><tbody>
-      ${list.map((r, i) => `<tr data-i="${rows.indexOf(r)}" tabindex="0"><td data-label="时间">${shortDate(r.time)}</td><td data-label="${whoLabel}">${esc(r.who)}</td><td data-label="模型" class="mono">${esc(r.model)}${r.effort ? `<span class="tag">${esc(r.effort)}</span>` : ''}</td><td data-label="输入" class="num">${fmt(r.input)}</td><td data-label="输出" class="num">${fmt(r.output)}</td><td data-label="缓存" class="num">${fmt(r.cacheWrite)}（写入） / ${fmt(r.cacheRead)}（读取）</td><td data-label="耗时" class="num">${((r.duration || 0) / 1000).toFixed(1)}s</td><td data-label="状态">${statusPill(r.status)}</td></tr>`).join('')}
+    content.innerHTML = list.length ? `<div class="card table-card"><div class="table-scroll"><table class="log-table"><thead><tr><th>时间</th><th>${whoLabel}</th><th>模型</th><th class="num">输入</th><th class="num">输出</th><th class="num">缓存（写入/读取）</th><th class="num">耗时</th><th>状态</th></tr></thead><tbody>
+      ${list.map((r, i) => `<tr data-i="${rows.indexOf(r)}" tabindex="0"><td data-label="时间">${shortDate(r.time)}</td><td data-label="${whoLabel}">${esc(r.who)}</td><td data-label="模型" class="mono">${esc(r.model)}${r.effort ? `<span class="tag">${esc(r.effort)}</span>` : ''}</td><td data-label="输入" class="num">${fmt(r.input)}</td><td data-label="输出" class="num">${fmt(r.output)}</td><td data-label="缓存（写入/读取）" class="num">${Number(r.cacheWrite || 0).toLocaleString()} / ${Number(r.cacheRead || 0).toLocaleString()}</td><td data-label="耗时" class="num">${((r.duration || 0) / 1000).toFixed(1)}s</td><td data-label="状态">${statusPill(r.status)}</td></tr>`).join('')}
       </tbody></table></div></div>${done ? '<p class="hint center">没有更多记录了</p>' : `<div class="center"><button class="btn" type="button" id="log-more">加载更多</button></div>`}`
       : empty('list', rows.length ? '没有符合条件的请求' : '暂无请求记录', rows.length ? '换个筛选条件试试。' : '客户端发起请求后会显示在这里。');
     $$('tbody tr', content).forEach(tr => { const open = () => requestDetail(source, rows[Number(tr.dataset.i)]); tr.onclick = open; tr.onkeydown = e => { if (e.key === 'Enter') open(); }; });
@@ -75,7 +75,7 @@ function requestDetail(source, r) {
     ...(r.upstreamModel && r.upstreamModel !== r.model ? [['上游模型', r.upstreamModel]] : []),
     ...(r.effort ? [['思考强度', r.effort]] : []),
     ['输入 Token', Number(r.input || 0).toLocaleString()], ['输出 Token', Number(r.output || 0).toLocaleString()],
-    ['缓存写入', Number(r.cacheWrite || 0).toLocaleString()], ['缓存读取', Number(r.cacheRead || 0).toLocaleString()],
+    ['缓存（写入/读取）', `${Number(r.cacheWrite || 0).toLocaleString()} / ${Number(r.cacheRead || 0).toLocaleString()}`],
     ['推理 Token', r.reasoning == null ? '计入输出' : Number(r.reasoning || 0).toLocaleString()],
     ['耗时', `${r.duration || 0} ms`], ['HTTP 状态', String(r.status ?? '—')],
   ];
@@ -107,8 +107,8 @@ function failDetail(source, f) {
   const body = JSON.stringify(f.body || {}, null, 2);
   const sheet = openSheet(`${sheetHead('失败请求', failTitle(source, f))}<div class="sheet-body">
     <dl class="detail"><div><dt>时间</dt><dd>${date(f.ts)}</dd></div><div><dt>上游状态</dt><dd>${esc(f.upstream_status || '连接失败')}</dd></div><div><dt>模式</dt><dd>${f.streaming ? '流式' : '非流式'}</dd></div>${f.error_type ? `<div><dt>错误类型</dt><dd>${esc(f.error_type)}</dd></div>` : ''}</dl>
-    <section class="form-section"><div class="row-between"><h4>上游返回</h4></div><pre class="code-block">${esc(f.upstream_body || f.error_repr || '（无）')}</pre></section>
-    <section class="form-section"><div class="row-between"><h4>请求体</h4><button class="btn small ghost" type="button" id="copy-body">${icon('copy')}复制</button></div><pre class="code-block">${esc(body)}</pre></section></div>`, {wide: true});
+    <section class="form-section"><div class="row-between"><h4>完整上游请求体</h4><button class="btn small ghost" type="button" id="copy-body">${icon('copy')}复制</button></div><pre class="code-block failure-request">${esc(body)}</pre></section>
+    <section class="form-section"><div class="row-between"><h4>上游返回</h4></div><pre class="code-block">${esc(f.upstream_body || f.error_repr || '（无）')}</pre></section></div>`, {wide: true});
   $('#copy-body', sheet).onclick = () => copyText(body, '请求体已复制');
 }
 

@@ -2,6 +2,7 @@ import json
 import time
 import uuid
 from collections import deque
+from copy import deepcopy
 
 import httpx
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -27,7 +28,7 @@ def _failure(account: dict, body: dict, streaming: bool, status=None, text="", e
         "ts": int(time.time()), "account_id": account["id"], "streaming": streaming,
         "upstream_status": status, "upstream_body": text[:4000],
         "error_type": type(error).__name__ if error else "",
-        "error_repr": repr(error) if error else "", "body": body,
+        "error_repr": repr(error) if error else "", "body": deepcopy(body),
     })
 
 

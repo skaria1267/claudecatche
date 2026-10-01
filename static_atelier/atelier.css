@@ -335,6 +335,7 @@ details.advanced>*:not(summary){margin-top:14px}
 .detail dt{color:var(--text-3);font-size:12px}
 .detail dd{margin:2px 0 0;font-weight:600;word-break:break-all;font-variant-numeric:tabular-nums}
 .code-block{margin:0;padding:12px 14px;max-height:360px;overflow:auto;border-radius:var(--r);background:var(--surface-2);border:1px solid var(--border);font-family:var(--mono);font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-all;color:var(--text-2)}
+.code-block.failure-request{max-height:none;overflow:visible;overflow-wrap:anywhere}
 .kv{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .kv div{padding:12px 14px;border-radius:var(--r);background:var(--surface-2);border:1px solid var(--border)}
 .kv span{display:block;color:var(--text-3);font-size:12px}

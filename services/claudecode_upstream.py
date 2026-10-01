@@ -1,6 +1,7 @@
 import json
 import time
 from collections import deque
+from copy import deepcopy
 
 import httpx
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -31,7 +32,7 @@ def _failure(account_id: int, body: dict, streaming: bool, response=None, error=
         "upstream_body": (getattr(response, "text", "") or "")[:4000],
         "error_type": type(error).__name__ if error else "",
         "error_repr": repr(error) if error else "",
-        "body": body,
+        "body": deepcopy(body),
     })
 
 

@@ -2,6 +2,7 @@ import time
 import json
 import logging
 from collections import deque
+from copy import deepcopy
 import httpx
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -25,7 +26,7 @@ def record_failure(channel_name: str, body: dict, streaming: bool,
         "error_repr": error_repr,
         "upstream_status": upstream_status,
         "upstream_body": upstream_body,
-        "body": body,
+        "body": deepcopy(body),
     })
 
 
@@ -193,6 +194,7 @@ async def forward_stream(body: dict, headers: dict, channel: dict, start_time: f
         }
 
         async def generate():
+            log_status = upstream_status
             try:
                 async for line in resp.aiter_lines():
                     if not line:
@@ -213,12 +215,15 @@ async def forward_stream(body: dict, headers: dict, channel: dict, start_time: f
                     elif data.get("type") == "message_delta":
                         usage["output_tokens"] = data.get("usage", {}).get("output_tokens", 0)
             except Exception as e:
+                log_status = 502
+                record_failure(channel["name"], body, streaming=True,
+                               error_type=type(e).__name__, error_repr=repr(e))
                 yield f"data: {json.dumps({'error': str(e)})}\n"
             finally:
                 await resp.aclose()
                 await client.aclose()
                 duration_ms = int((time.time() - start_time) * 1000)
-                await _log(channel, model, usage, duration_ms, upstream_status)
+                await _log(channel, model, usage, duration_ms, log_status)
 
         return StreamingResponse(generate(), media_type="text/event-stream")
 
