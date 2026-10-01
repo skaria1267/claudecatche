@@ -72,6 +72,27 @@ def _inject_billing(body: dict, version: str) -> None:
         body["system"] = [block, *system]
 
 
+def _has_client_cache_marker(body: dict) -> bool:
+    if isinstance(body.get("cache_control"), dict):
+        return True
+    for section in ("tools", "system", "messages"):
+        items = body.get(section)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if isinstance(item.get("cache_control"), dict):
+                return True
+            content = item.get("content")
+            if isinstance(content, list) and any(
+                isinstance(block, dict) and isinstance(block.get("cache_control"), dict)
+                for block in content
+            ):
+                return True
+    return False
+
+
 async def prepare(raw_body: dict) -> tuple[dict, str, str]:
     version = await current_version()
     body = copy.deepcopy(raw_body)
@@ -86,8 +107,10 @@ async def prepare(raw_body: dict) -> tuple[dict, str, str]:
                 body["output_config"] = {"effort": match.group(2)}
             else:
                 body.pop("output_config", None)
-    mode = await get_setting("claudecode_cache_mode") or "auto"
-    if mode != "off":
+    if (await get_setting("claudecode_client_cache") or "0") == "1":
+        if not _has_client_cache_marker(body):
+            body["cache_control"] = {"type": "ephemeral"}
+    elif (mode := await get_setting("claudecode_cache_mode") or "auto") != "off":
         try:
             rules = json.loads(await get_setting("claudecode_cache_rules") or "[]")
         except ValueError:

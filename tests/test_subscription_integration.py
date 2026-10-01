@@ -105,6 +105,21 @@ class SubscriptionIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(response.status_code, 400)
 
+    async def test_claudecode_client_cache_switch_is_independent(self):
+        response = await self.client.patch(
+            "/api/claudecode/config", headers=self.admin,
+            json={"client_cache": 1, "cache_mode": "auto", "cache_ttl": "1h"},
+        )
+        self.assertEqual(response.status_code, 200)
+        response = await self.client.get("/api/claudecode/config", headers=self.admin)
+        self.assertEqual(response.json()["client_cache"], "1")
+        self.assertEqual(response.json()["cache_mode"], "auto")
+        self.assertEqual(response.json()["cache_ttl"], "1h")
+        response = await self.client.patch(
+            "/api/claudecode/config", headers=self.admin, json={"client_cache": 2},
+        )
+        self.assertEqual(response.status_code, 400)
+
     async def test_wanquan_import_reencrypts_accounts_and_preserves_logs(self):
         source = sqlite3.connect(WANQUAN_DB)
         source.executescript("""

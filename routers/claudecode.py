@@ -22,6 +22,7 @@ SETTING_KEYS = {
     "enabled": "claudecode_enabled", "models": "claudecode_models",
     "thinking_alias": "claudecode_thinking_alias", "cache_mode": "claudecode_cache_mode",
     "cache_ttl": "claudecode_cache_ttl", "cache_rules": "claudecode_cache_rules",
+    "client_cache": "claudecode_client_cache",
     "rpm_limit": "claudecode_rpm_limit",
 }
 _account_index = 0
@@ -69,6 +70,7 @@ class ConfigUpdate(BaseModel):
     cache_mode: str | None = None
     cache_ttl: str | None = None
     cache_rules: str | None = None
+    client_cache: int | None = None
     rpm_limit: int | None = None
 
 
@@ -194,6 +196,8 @@ async def update_config(req: ConfigUpdate, authorization: str = Header(None)):
         raise HTTPException(status_code=400, detail="缓存模式无效")
     if updates.get("cache_ttl") not in (None, "5m", "1h"):
         raise HTTPException(status_code=400, detail="缓存 TTL 无效")
+    if updates.get("client_cache") not in (None, 0, 1):
+        raise HTTPException(status_code=400, detail="本地 Claude Code 缓存开关无效")
     for key in ("models", "cache_rules"):
         if key in updates:
             try:

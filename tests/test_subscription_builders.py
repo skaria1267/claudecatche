@@ -124,6 +124,54 @@ class SubscriptionBuilderTests(unittest.IsolatedAsyncioTestCase):
             {"type": "ephemeral", "ttl": "1h"},
         )
 
+    async def test_claudecode_client_cache_preserves_markers_without_proxy_injection(self):
+        settings = {
+            "claudecode_thinking_alias": "0",
+            "claudecode_client_cache": "1",
+            "claudecode_cache_mode": "auto",
+            "claudecode_cache_ttl": "1h",
+        }
+        raw = {
+            "model": "claude-sonnet-4-6",
+            "system": [
+                {"type": "text", "text": "rules"},
+                {"type": "text", "text": "context", "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": "last"},
+            ],
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": "hello", "cache_control": {"type": "ephemeral"}},
+            ]}],
+        }
+        with patch(
+            "services.claudecode_request_builder.get_setting",
+            AsyncMock(side_effect=lambda key: settings.get(key)),
+        ):
+            body, _, _ = await prepare_claudecode(raw)
+
+        self.assertNotIn("cache_control", body)
+        self.assertEqual(body["system"][2], raw["system"][1])
+        self.assertEqual(body["system"][3], raw["system"][2])
+        self.assertEqual(body["messages"], raw["messages"])
+        self.assertEqual(len(raw["system"]), 3)
+
+    async def test_claudecode_client_cache_defaults_to_five_minutes_without_markers(self):
+        settings = {
+            "claudecode_thinking_alias": "0",
+            "claudecode_client_cache": "1",
+            "claudecode_cache_mode": "off",
+            "claudecode_cache_ttl": "1h",
+        }
+        raw = {"model": "claude-sonnet-4-6", "messages": [{"role": "user", "content": "hello"}]}
+        with patch(
+            "services.claudecode_request_builder.get_setting",
+            AsyncMock(side_effect=lambda key: settings.get(key)),
+        ):
+            body, _, _ = await prepare_claudecode(raw)
+
+        self.assertEqual(body["cache_control"], {"type": "ephemeral"})
+        self.assertNotIn("cache_control", raw)
+        self.assertNotIn("cache_control", body["system"][0])
+
     def test_codex_sse_events_become_chat_chunks(self):
         created = _chat_chunk(
             {"type": "response.created"}, "gpt-5.3-codex", "chatcmpl-test"
