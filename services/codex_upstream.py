@@ -10,6 +10,7 @@ from services import codex_store
 
 
 CODEX_BASE = "https://chatgpt.com/backend-api/codex"
+RESET_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
 CODEX_VERSION = "0.157.0"
 USER_AGENT = f"codex_exec/{CODEX_VERSION} (Debian 13.0.0; x86_64) xterm-256color (codex_exec; {CODEX_VERSION})"
 FAILURES: deque = deque(maxlen=50)
@@ -71,6 +72,48 @@ async def fetch_usage(token: str, account: dict) -> dict:
     if response.status_code >= 400:
         raise RuntimeError(f"Codex 用量刷新失败 HTTP {response.status_code}: {response.text[:300]}")
     return response.json()
+
+
+async def fetch_reset_credits(token: str, account: dict) -> dict:
+    async with httpx.AsyncClient(timeout=30, proxy=account.get("proxy_url") or None) as client:
+        response = await client.get(
+            RESET_CREDITS_URL,
+            headers=headers(token, account.get("account_uid") or "", "application/json"),
+        )
+    if response.status_code >= 400:
+        raise RuntimeError(f"Codex 重置卡查询失败 HTTP {response.status_code}: {response.text[:300]}")
+    data = response.json()
+    if not isinstance(data, dict) or not isinstance(data.get("credits"), list):
+        raise RuntimeError("Codex 重置卡响应格式无效")
+    fields = ("id", "reset_type", "status", "title", "description", "granted_at", "expires_at")
+    credits = [{key: item.get(key) for key in fields} for item in data["credits"]
+               if isinstance(item, dict)]
+    return {
+        "available_count": sum(item["status"] == "available" and
+                               item["reset_type"] == "codex_rate_limits" for item in credits),
+        "credits": credits,
+    }
+
+
+async def consume_reset_credit(token: str, account: dict, credit_id: str) -> dict:
+    credits = await fetch_reset_credits(token, account)
+    credit = next((item for item in credits["credits"] if item["id"] == credit_id), None)
+    if not credit or credit["status"] != "available" or credit["reset_type"] != "codex_rate_limits":
+        raise ValueError("这张 Codex 重置卡已不可用，请刷新列表")
+    redeem_id = str(uuid.uuid5(uuid.NAMESPACE_URL,
+                               f"catch:codex-reset:{account.get('account_uid')}:{credit_id}"))
+    async with httpx.AsyncClient(timeout=30, proxy=account.get("proxy_url") or None) as client:
+        response = await client.post(
+            f"{RESET_CREDITS_URL}/consume",
+            headers=headers(token, account.get("account_uid") or "", "application/json"),
+            json={"credit_id": credit_id, "redeem_request_id": redeem_id},
+        )
+    if response.status_code >= 400:
+        raise RuntimeError(f"Codex 重置卡使用失败 HTTP {response.status_code}: {response.text[:300]}")
+    data = response.json()
+    if not isinstance(data, dict) or data.get("code") != "reset":
+        raise RuntimeError("上游未确认重置成功，请刷新重置卡和用量后再决定是否重试")
+    return {"ok": True, "windows_reset": data.get("windows_reset")}
 
 
 def _usage(event: dict) -> dict:

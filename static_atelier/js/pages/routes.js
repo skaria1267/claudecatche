@@ -276,6 +276,8 @@ async function accountSheet(ctx, kind, account, {focusAuth = false, justCreated 
         <div id="sa-usage">${quotaBars(account.usage)}</div>${account.usage_refreshed_at ? `<p class="hint">更新于 ${date(account.usage_refreshed_at)}</p>` : ''}
         <div class="row-actions"><button class="btn small" type="button" id="sa-refresh" ${ready ? '' : 'disabled'}>${icon('refresh')}刷新用量</button>${kind === 'codex' ? `<button class="btn small" type="button" id="sa-models" ${ready ? '' : 'disabled'}>${icon('download')}拉取可用模型</button>` : ''}<span class="hint" id="sa-usage-state"></span></div>
         ${kind === 'codex' ? `<div id="sa-model-list">${modelChips(account.models)}</div>` : ''}</section>` : ''}
+      ${id && kind === 'codex' ? `<section class="form-section"><h4>重置卡</h4><div id="sa-reset-credits"><p class="hint">${ready ? '尚未查询' : '授权后可查询'}</p></div>
+        <div class="row-actions"><button class="btn small" type="button" id="sa-reset-refresh" ${ready ? '' : 'disabled'}>${icon('refresh')}查看重置卡</button><span class="hint" id="sa-reset-state"></span></div></section>` : ''}
       <section class="form-section"><h4>账号信息</h4>
         ${field('名称', `<input id="sa-name" value="${esc(account?.name || meta.title)}" autocomplete="off">`, '仅用于在面板里区分账号。')}
         ${proxyInput('sa-proxy', account?.proxy_url, {hint: '这个代理只用于当前账号。支持 http / socks5 链接或 host:port:user:password，留空为直连。'})}
@@ -325,6 +327,50 @@ async function accountSheet(ctx, kind, account, {focusAuth = false, justCreated 
     $('#sa-model-list').innerHTML = modelChips(d.models);
     return `已拉取并保存 ${d.models.length} 个模型`;
   }, $('#sa-usage-state'));
+  if (kind === 'codex') {
+    const resetRoot = $('#sa-reset-credits');
+    const resetState = $('#sa-reset-state');
+    const loadResetCredits = async () => {
+      const data = await api(`/api/codex/accounts/${id}/reset-credits`);
+      const expiryTime = value => {
+        const time = Date.parse(value || '');
+        return Number.isFinite(time) ? time : Infinity;
+      };
+      const available = (data.credits || []).filter(c => c.reset_type === 'codex_rate_limits' && c.status === 'available' && c.id)
+        .sort((a, b) => expiryTime(a.expires_at) - expiryTime(b.expires_at));
+      resetRoot.innerHTML = available.length ? `<div class="reset-credit-list">${available.map(c =>
+        `<div class="reset-credit-row"><div><strong>${esc(c.title || '完整重置')}</strong><p class="hint">${expiryTime(c.expires_at) !== Infinity ? `有效期至 ${esc(new Date(c.expires_at).toLocaleString('zh-CN', {hour12: false}))}` : '未注明到期时间'}</p></div>
+          <button class="btn small" type="button" data-credit="${esc(c.id)}">使用</button></div>`).join('')}</div>` : '<p class="hint">暂无可用重置卡</p>';
+      $$('[data-credit]', resetRoot).forEach(button => button.onclick = async () => {
+        const credit = available.find(c => c.id === button.dataset.credit);
+        if (!credit) return;
+        const expiry = expiryTime(credit.expires_at) !== Infinity
+          ? new Date(credit.expires_at).toLocaleString('zh-CN', {hour12: false}) : '未注明';
+        const confirmed = await confirmDialog({title: `使用「${credit.title || '完整重置'}」？`,
+          message: `这张卡的到期时间：${expiry}。将重置「${account.name}」的 Codex 用量窗口，并可能改变每周重置日期。此操作不能撤销。`,
+          confirmText: '确认使用', danger: true});
+        if (!confirmed) return;
+        await busy(button, async () => {
+          await post(`/api/codex/accounts/${id}/reset-credits/consume`, {credit_id: credit.id});
+          resetRoot.innerHTML = '<p class="hint">正在更新重置卡和用量…</p>';
+          let refreshed = true;
+          try {
+            const usage = await post(`/api/codex/accounts/${id}/usage`);
+            account.usage = usage;
+            $('#sa-usage').innerHTML = quotaBars(usage);
+          } catch (_) { refreshed = false; }
+          try { await loadResetCredits(); } catch (_) { refreshed = false; }
+          reloadView().catch(() => {});
+          return refreshed ? '重置卡已使用，用量已刷新' : '重置卡已使用；部分状态刷新失败，请稍后手动刷新';
+        }, resetState);
+      });
+      return data;
+    };
+    $('#sa-reset-refresh').onclick = e => busy(e.currentTarget, async () => {
+      const data = await loadResetCredits();
+      return `可用重置卡 ${data.available_count} 张`;
+    }, resetState);
+  }
 
   const authDone = async (message, fresh) => {
     stopPoll?.();

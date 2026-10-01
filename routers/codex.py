@@ -1,3 +1,4 @@
+import asyncio
 import json
 import time
 
@@ -11,7 +12,10 @@ from services.codex_auth import (
     authcode_complete, authcode_start, device_poll, device_start, valid_token,
 )
 from services.codex_request_builder import client_models, prepare_chat, prepare_responses
-from services.codex_upstream import clear_failures, failures, fetch_models, fetch_usage, forward
+from services.codex_upstream import (
+    clear_failures, consume_reset_credit, failures, fetch_models, fetch_reset_credits,
+    fetch_usage, forward,
+)
 from services.proxy_config import normalize_proxy_url
 from services.secret_store import is_configured as secret_store_configured
 
@@ -24,6 +28,7 @@ SETTING_KEYS = {
     "allow_unlisted_models": "codex_allow_unlisted_models",
 }
 _account_index = 0
+_reset_locks: dict[int, asyncio.Lock] = {}
 
 
 async def _admin(authorization: str | None) -> None:
@@ -66,6 +71,10 @@ class DevicePollRequest(BaseModel):
 class AuthcodeCompleteRequest(BaseModel):
     login_session_id: str
     callback_url: str
+
+
+class ResetCreditConsume(BaseModel):
+    credit_id: str
 
 
 class ConfigUpdate(BaseModel):
@@ -197,6 +206,33 @@ async def refresh_usage(account_id: int, authorization: str = Header(None)):
         return usage
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/api/codex/accounts/{account_id}/reset-credits")
+async def reset_credits(account_id: int, authorization: str = Header(None)):
+    await _admin(authorization)
+    try:
+        token, account = await valid_token(account_id)
+        return await fetch_reset_credits(token, account)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/api/codex/accounts/{account_id}/reset-credits/consume")
+async def use_reset_credit(account_id: int, req: ResetCreditConsume,
+                           authorization: str = Header(None)):
+    await _admin(authorization)
+    credit_id = req.credit_id.strip()
+    if not credit_id:
+        raise HTTPException(status_code=400, detail="请选择要使用的重置卡")
+    async with _reset_locks.setdefault(account_id, asyncio.Lock()):
+        try:
+            token, account = await valid_token(account_id)
+            return await consume_reset_credit(token, account, credit_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.get("/api/codex/logs")

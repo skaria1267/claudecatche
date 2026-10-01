@@ -77,34 +77,16 @@ export async function overviewPage(ctx) {
   const failTotal = (fails?.length || 0) + (cxFails?.length || 0) + (ccFails?.length || 0);
   if (failTotal) issues.push({tone: 'warn', text: `最近有 ${failTotal} 条失败请求`, href: '/page/logs?view=failures'});
 
-  const node = (iconName, title, text, cls = '') => `<div class="flow-node ${cls}"><span class="flow-ico">${icon(iconName)}</span><div><strong>${title}</strong><p>${text}</p></div></div>`;
-  const arrow = `<div class="flow-arrow" aria-hidden="true">${icon('arrow')}</div>`;
   const origin = location.origin;
 
   ctx.app.innerHTML = `<div class="page">
-    <section class="hero">
-      <div class="hero-copy">
-        <p class="eyebrow">Claude Catche</p>
-        <h1>一个地址，一把钥匙，<br class="br-wide">接入你所有的 AI 账号</h1>
-        <p class="lead">这是一个 AI 接口中转站。你把 Claude、OpenAI、ChatGPT 订阅等上游账号配置在这里，各种 AI 客户端只需要填写中转站的地址和访问密钥就能使用，真实的 Key 和账号凭据不会离开服务器。</p>
-      </div>
-      <div class="flow">
-        ${node('monitor', '你的 AI 客户端', 'Claude Code、Codex CLI、Cherry Studio 等')}
-        ${arrow}
-        ${node('shield', 'Claude Catche', '校验访问密钥，按路由转发，记录用量', 'core')}
-        ${arrow}
-        ${node('server', '上游服务', 'Claude API、OpenAI、ChatGPT 与 Claude 订阅')}
-      </div>
-    </section>
-
-    ${issues.length ? `<section class="card attention"><header class="card-head"><div class="card-title"><span class="card-ico warn">${icon('alert')}</span><div><h3>需要注意</h3><p>${issues.length} 项待处理，点击直接前往</p></div></div></header><div class="issue-list">${issues.map(i => `<a class="issue ${i.tone}" href="${i.href}"><i></i><span>${esc(i.text)}</span>${icon('chevron')}</a>`).join('')}</div></section>` : `<section class="card all-good"><span class="card-ico ok">${icon('check')}</span><div><strong>一切正常</strong><p>没有需要处理的账号或失败请求。</p></div></section>`}
-
-    <div class="section-head"><h2>四条路由</h2><p>每条路由对应一类上游。点击卡片进入配置。</p></div>
-    <div class="route-grid">${routes.map(r => `<a class="route-card" href="${r.href}">
+    <div class="route-grid overview-routes">${routes.map(r => `<a class="route-card" href="${r.href}">
       <div class="route-top"><span class="route-ico">${icon(r.icon)}</span>${pill(r.state[0], r.state[1])}</div>
       <h3>${r.name}</h3><p>${r.desc}</p>
       ${r.empty ? `<div class="route-first">${icon('info')}<span>${r.first}</span></div>` : `<dl class="route-stats">${r.stats.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>`}
       <span class="route-cta">${r.empty ? '开始配置' : '管理'}${icon('arrow')}</span></a>`).join('')}</div>
+
+    ${issues.length ? `<section class="card attention"><header class="card-head"><div class="card-title"><span class="card-ico warn">${icon('alert')}</span><div><h3>需要注意</h3><p>${issues.length} 项待处理，点击直接前往</p></div></div></header><div class="issue-list">${issues.map(i => `<a class="issue ${i.tone}" href="${i.href}"><i></i><span>${esc(i.text)}</span>${icon('chevron')}</a>`).join('')}</div></section>` : `<section class="card all-good"><span class="card-ico ok">${icon('check')}</span><div><strong>一切正常</strong><p>没有需要处理的账号或失败请求。</p></div></section>`}
 
     <div class="section-head"><h2>三步开始使用</h2><p>配置好上游后，把下面的信息填进客户端即可。</p></div>
     <ol class="steps">
