@@ -18,3 +18,7 @@ proxy.db-shm
 data
 DEPLOY.txt
 README.md
+DEPLOY.md
+CLAUDE.md
+.claude
+docs

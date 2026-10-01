@@ -1,6 +1,6 @@
 services:
   claudecatche:
-    image: ghcr.io/skaria1267/claudecatche:latest
+    image: ghcr.io/skaria1267/claudecatche:${CATCH_IMAGE_TAG:-latest}
     container_name: claudecatche
     restart: unless-stopped
     ports:

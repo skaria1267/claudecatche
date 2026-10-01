@@ -1,6 +1,9 @@
 # Claude Catche
 
-多渠道 Claude API 缓存反向代理。在管理面板里添加各个中转/官转**渠道**（渠道名 + 上游 URL + 渠道 Key），
+统一管理普通 Claude 渠道、官方 OpenAI API、Codex 订阅和 Claude Code 订阅的反向代理。
+所有已合并功能统一在 `main` 分支，唯一管理前端是 `static_atelier/`。部署和更新见 [DEPLOY.md](DEPLOY.md)。
+
+在管理面板里添加各个中转/官转**渠道**（渠道名 + 上游 URL + 渠道 Key），
 客户端把 base URL 填成 `http://你的地址/<渠道名>/v1`、Key 填**访问密钥**，发送标准 Claude 格式请求，
 反代会校验访问密钥、按该渠道的缓存规则自动打缓存断点，再用该渠道的上游 URL 和 Key 转发出去。
 
@@ -21,9 +24,19 @@
 - **请求日志 / 用量统计** — 每个渠道的 token 用量、缓存命中、耗时、状态码
 - **Web 管理面板** — 纯 Vanilla JS，无 emoji，图标全部 SVG，日间/夜间主题
 - **独立 OpenAI 转发** — `/gpt/v1` 使用独立官方 Key、模型清单、代理、Prompt Cache 与思考后缀配置，不经过 Claude 渠道处理链
-- **Codex 订阅转发** — `/codex/v1` 支持设备码 OAuth、多账号、五小时/周/独立模型窗口、credits、账号代理、模型拉取、缓存断点与思考后缀
+- **Codex 订阅转发** — `/codex/v1` 支持回调链接/设备码 OAuth、多账号、五小时/周/独立模型窗口、credits、账号代理、模型拉取、缓存断点与思考后缀
+- **Codex 版本与重置卡** — 获取/应用官方最新客户端版本、手动版本和恢复上一版；按账号查看重置卡到期时间并选择使用
 - **Claude Code 订阅转发** — `/claudecode/v1` 整合 Wanquan 的 sessionKey/OAuth、多账号、用量、代理、缓存与思考功能
-- **日志完全隔离** — Claude 渠道、OpenAI API、Codex 订阅和 Claude Code 订阅各自使用独立表、页面和失败请求区
+- **日志分区** — Claude 与 OpenAI 日志在日志页按来源查看；Codex 和 Claude Code 使用各自独立日志页与失败请求区
+
+| 连接类型 | 客户端 Base URL | 认证 |
+| --- | --- | --- |
+| 普通 Claude 渠道 | `https://你的域名/<渠道名>/v1` | 全局 Access Key |
+| 官方 OpenAI API | `https://你的域名/gpt/v1` | 全局 Access Key |
+| Codex 订阅（OpenAI 兼容） | `https://你的域名/codex/v1` | 全局 Access Key |
+| Claude Code 订阅（Anthropic 兼容） | `https://你的域名/claudecode/v1` | 全局 Access Key |
+
+Claude Code CLI 的 `ANTHROPIC_BASE_URL` 填 `https://你的域名/claudecode`，不再追加 `/v1`，客户端会自行补齐接口路径。
 
 ## 请求路由说明
 
@@ -75,7 +88,7 @@ OpenAI Compatible 模式：
 openssl rand -base64 32
 ```
 
-- Codex：前端添加账号后点击「开始设备授权」，按提示打开 OpenAI 设备授权页并输入代码。
+- Codex：前端添加账号后选择浏览器授权，将完整回调 URL 粘回前端完成登录；也可选择设备码授权（工作空间需允许设备码验证）。
 - Claude Code：添加账号时填入 Claude `sessionKey`，服务端自动换取并刷新 OAuth token。
 - 两者均使用「设置」中的全局 Access Key 作为客户端密码。
 - 代理支持 URL、`host:port` 和 `host:port:user:password` 格式。
@@ -91,6 +104,15 @@ Claude/Anthropic 客户端连接 Claude Code：
 - Base URL：`https://你的域名/claudecode/v1`
 - Messages：`POST /claudecode/v1/messages`
 - 思考：`<model>-thinking-medium` 会注入 adaptive thinking 和 `output_config.effort`
+
+### 客户端版本与账号管理
+
+- Codex 页支持「获取最新版」「应用最新版」及版本管理。检查从 OpenAI 官方 GitHub 稳定版 release 获取版本，不会自动应用；保存后会用于上游请求 User-Agent 和模型目录的 `client_version`，并非在 VPS 安装或升级 Codex CLI。
+- 可手动填写版本或恢复上一版；检查更新可选择账号代理。更新版本不代表账号自动获得新模型权限。
+- 模型拉取后可选择保存；配置的全局模型清单非空时优先使用该清单，新增模型需重新拉取/保存或手动添加。
+- 每个 Codex 账号可查询重置卡列表，显示各卡到期时间，优先排列最近到期的卡；使用前确认具体卡片，成功后刷新账号用量。
+- Claude Code 页也有独立的客户端版本管理。启用「接入电脑 CC 模式」后，缓存断点由本地 Claude Code 请求传入，不再叠加服务端断点规则。
+- 订阅的实际可用模型、窗口和重置卡由上游账号决定；前端配置保存后作用于服务端转发，不改变上游权限。
 
 ### 从 Wanquan 迁移
 
@@ -155,7 +177,9 @@ python main.py
 
 ## Docker / VPS 部署
 
-见 `DEPLOY.txt`，里面是可以直接复制粘贴到 VPS 的整套命令。
+见 [DEPLOY.md](DEPLOY.md)。`main` 的 GitHub Actions 自动构建并发布
+`ghcr.io/skaria1267/claudecatche`，标签包括 `latest`、`main` 和提交短 SHA；VPS 可以直接拉取镜像，无需本地构建。
+`CATCH_IMAGE_TAG` 可固定提交版本用于回滚。`CLAUDE.md` 是含私有连接信息的本地交接文档，不提交或打包进镜像。
 
 ## 项目结构
 
@@ -168,23 +192,31 @@ claudecatche/
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
-├── DEPLOY.txt           # VPS 部署指南
+├── DEPLOY.md            # main / GHCR / VPS 部署与回滚
 ├── routers/
 │   ├── auth.py          # 登录认证
 │   ├── channels.py      # 渠道增删改查
 │   ├── settings.py      # 设置读写
 │   ├── logs.py          # 日志 / 用量 / 失败记录
 │   ├── openai.py        # 独立 OpenAI 配置与 /gpt/v1 转发
+│   ├── codex.py         # Codex 账号、版本、用量、重置卡及转发
+│   ├── claudecode.py    # Claude Code 账号、版本及转发
 │   └── proxy.py         # 反代核心：路由匹配渠道 + 转发
 ├── services/
 │   ├── cache_inject.py  # 缓存断点注入（auto / rules）
 │   ├── request_builder.py # 按渠道配置打断点 + 清洗字段
 │   ├── openai_request_builder.py # OpenAI 缓存与思考后缀请求构造
 │   ├── openai_upstream.py # OpenAI 模型拉取、流式转发与用量日志
+│   ├── codex_client.py  # Codex 客户端版本配置与官方更新查询
+│   ├── codex_auth.py    # Codex OAuth、用量与重置卡
+│   ├── codex_upstream.py # Codex 上游转发与独立日志
+│   ├── claudecode_client.py # Claude Code 客户端版本配置
+│   ├── claudecode_upstream.py # Claude Code 上游转发与独立日志
 │   └── upstream.py      # 上游转发（认证头 / 流式 / 日志）
 └── static_atelier/      # 唯一管理前端（桌面/移动端响应式）
     ├── login.html app.html
-    └── atelier.css atelier.js
+    ├── atelier.css
+    └── js/             # 按页面拆分的管理逻辑
 ```
 
 ## 技术栈
