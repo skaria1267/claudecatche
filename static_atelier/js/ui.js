@@ -149,7 +149,8 @@ export function bindProxyTest(id, targetUrl) {
 const usageLabels = {five_hour: '5 小时', five_hour_opus: '5 小时 Opus', seven_day: '每周', seven_day_opus: 'Opus 每周', seven_day_sonnet: 'Sonnet 每周', seven_day_total: '每周总计'};
 export function quotaWindows(usage) {
   const windows = []; const rate = usage?.rate_limit || {};
-  const push = (name, w) => { const used = Number(w.used_percent ?? w.utilization ?? 0); windows.push({name, pct: used <= 1 ? used * 100 : used, reset: w.reset_at ?? w.resets_at}); };
+  // Both upstream fields are percentages, including values between 0 and 1.
+  const push = (name, w) => { const used = Number(w.used_percent ?? w.utilization ?? 0); windows.push({name, pct: Number.isFinite(used) ? used : 0, reset: w.reset_at ?? w.resets_at}); };
   if (rate.primary_window) push('5 小时', rate.primary_window);
   if (rate.secondary_window) push('每周', rate.secondary_window);
   (usage?.additional_rate_limits || []).forEach(x => { const name = x.limit_name || x.metered_feature || '独立窗口'; if (x.rate_limit?.primary_window) push(name, x.rate_limit.primary_window); if (x.rate_limit?.secondary_window) push(`${name} 每周`, x.rate_limit.secondary_window); });
