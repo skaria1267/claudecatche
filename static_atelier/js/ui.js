@@ -1,5 +1,5 @@
 // 可复用的表单与展示组件。各页面只拼装这些组件，保证四类路由操作一致。
-import {esc, icon, fmt, date, lines, $, $$, api, post, busy, toast, copyText} from './core.js';
+import {esc, icon, fmt, date, lines, $, $$, api, post, busy, toast, copyText, confirmDialog} from './core.js';
 
 let uid = 0;
 const nextId = prefix => `${prefix}-${++uid}`;
@@ -87,13 +87,28 @@ export function bindModelEditor(id, {onFetch = null} = {}) {
     render();
   };
   bulk.oninput = () => modelState.set(id, lines(bulk.value));
-  $('[data-model-clear]', root).onclick = () => { modelState.set(id, []); bulk.value = ''; render(); root.dispatchEvent(new Event('change', {bubbles: true})); };
+  const setList = list => { modelState.set(id, list); bulk.value = list.join('\n'); render(); root.dispatchEvent(new Event('change', {bubbles: true})); };
+  $('[data-model-clear]', root).onclick = async () => {
+    const current = getModels(id);
+    if (!current.length) return;
+    if (!await confirmDialog({title: `清空全部 ${current.length} 个模型？`, message: '清空后需要保存才会生效；保存前可点「放弃」恢复。', confirmText: '清空', danger: true})) return;
+    setList([]);
+  };
   const fetchBtn = $('[data-model-fetch]', root);
   if (fetchBtn && onFetch) fetchBtn.onclick = () => busy(fetchBtn, async () => {
     const list = await onFetch();
-    modelState.set(id, list); bulk.value = list.join('\n'); render();
-    root.dispatchEvent(new Event('change', {bubbles: true}));
-    return `已拉取 ${list.length} 个模型`;
+    const current = getModels(id);
+    const added = list.filter(m => !current.includes(m));
+    const missing = current.filter(m => !list.includes(m));
+    if (!current.length || !missing.length) {
+      setList([...new Set([...current, ...list])]);
+      return `已拉取 ${list.length} 个模型，新增 ${added.length} 个`;
+    }
+    // 当前列表里有上游没返回的模型时，让用户决定保留还是替换。
+    const choice = await confirmDialog({title: `上游返回 ${list.length} 个模型`, message: `新增 ${added.length} 个；当前列表里有 ${missing.length} 个不在上游结果中（如手动添加的别名）。合并会保留它们，替换会删除它们。`, confirmText: '替换', altText: '合并'});
+    if (!choice) return '已取消，模型列表未改动';
+    setList(choice === 'alt' ? [...new Set([...current, ...list])] : list);
+    return choice === 'alt' ? `已合并，新增 ${added.length} 个` : `已替换为上游的 ${list.length} 个模型`;
   }, $('[data-model-status]', root));
   render();
 }
@@ -198,5 +213,31 @@ export function watchForm(root, getState, save) {
 }
 export function clearForm() { activeForm = null; const bar = document.getElementById('savebar'); bar.classList.remove('show'); document.body.classList.remove('has-savebar'); }
 export const hasUnsaved = () => !!activeForm?.dirty();
+
+// Claude 格式入口的两种写法：Claude Code CLI 填到路由名为止，其他客户端 / SDK 带 /v1。
+export function endpointRows(base) {
+  return `<div class="endpoint-rows">${copyRow('Claude Code CLI（ANTHROPIC_BASE_URL）', base)}${copyRow('酒馆反代 / SDK / 其他客户端', `${base}/v1`)}</div>`;
+}
+
+// 接入指引：设置页展示全部，各路由「接入方式」标签只展示自己的那一条。片段里 {KEY} 在复制时换成访问密钥。
+export function accessGuides(origin) {
+  return {
+    claudecode: {title: 'Claude Code（订阅账号）', iconName: 'bolt', desc: '在终端设置环境变量后启动 claude。', url: `${origin}/claudecode`,
+      snippet: `export ANTHROPIC_BASE_URL="${origin}/claudecode"\nexport ANTHROPIC_AUTH_TOKEN="{KEY}"`},
+    channels: {title: 'Claude 渠道', iconName: 'layers', desc: '把 &lt;渠道名&gt; 换成「路由 → Claude 渠道」里的名称。Claude Code 也用这种写法。', url: `${origin}/<渠道名>/v1`,
+      snippet: `export ANTHROPIC_BASE_URL="${origin}/<渠道名>"\nexport ANTHROPIC_AUTH_TOKEN="{KEY}"`},
+    openai: {title: 'OpenAI 兼容客户端', iconName: 'sparkle', desc: 'Cherry Studio、Chatbox 等选择 OpenAI 类型，填写下面的地址和密钥。', url: `${origin}/gpt/v1`,
+      snippet: `Base URL: ${origin}/gpt/v1\nAPI Key: {KEY}`},
+    codex: {title: 'Codex（订阅账号）', iconName: 'terminal', desc: '支持 /chat/completions 和 /responses。Codex CLI 可在 ~/.codex/config.toml 中添加：', url: `${origin}/codex/v1`,
+      snippet: `[model_providers.catche]\nname = "Claude Catche"\nbase_url = "${origin}/codex/v1"\nenv_key = "CATCHE_KEY"\nwire_api = "responses"\n\n# 终端中：export CATCHE_KEY="{KEY}"`},
+  };
+}
+export function guideCard(guide, key, {address = ''} = {}) {
+  return card(guide.title, `<p class="hint">${guide.desc}</p>${address || copyRow('接入地址', guide.url)}<div class="snippet"><pre>${esc(guide.snippet.replace('{KEY}', '<访问密钥>'))}</pre><button class="icon-btn" type="button" data-snippet="${esc(guide.snippet)}" aria-label="复制配置片段">${icon('copy')}</button></div>`, {iconName: guide.iconName});
+}
+// getKey 返回当前访问密钥；复制时才替换，页面上始终显示占位符。
+export function bindSnippets(root, getKey) {
+  $$('[data-snippet]', root).forEach(b => b.onclick = () => copyText(b.dataset.snippet.replace('{KEY}', getKey() || '<访问密钥>'), '配置片段已复制'));
+}
 
 export {api, post, toast, busy, esc, icon};

@@ -95,40 +95,59 @@ export async function copyText(text, label = '已复制') {
 }
 
 // 底部弹层（手机）/ 右侧抽屉（桌面）。关闭时执行 onClose 以停止轮询等后台任务。
-const sheetState = {onClose: null};
-export function openSheet(html, {wide = false, onClose = null} = {}) {
+// guard 为真时记录表单快照（只看 [data-guard] 区域，忽略 [data-no-dirty]），有修改时关闭前先确认。
+const sheetState = {onClose: null, baseline: null};
+const formSnapshot = root => {
+  if (!root) return '';
+  const fields = $$('input,select,textarea', root).filter(el => !el.closest('[data-no-dirty]')).map(el => el.type === 'checkbox' ? el.checked : el.value);
+  const widgets = $$('.segmented,[data-chips]', root).filter(el => !el.closest('[data-no-dirty]')).map(el => el.dataset.value ?? el.textContent);
+  return JSON.stringify([fields, widgets]);
+};
+const guardRoot = () => { const sheet = document.getElementById('sheet'); return $('[data-guard]', sheet); };
+export function openSheet(html, {wide = false, onClose = null, guard = false} = {}) {
   const sheet = document.getElementById('sheet');
   sheetState.onClose?.();
   sheetState.onClose = onClose;
+  sheetState.baseline = null;
   sheet.innerHTML = `<div class="sheet-grip" aria-hidden="true"></div>${html}`;
   sheet.classList.toggle('wide', wide);
   sheet.classList.add('open'); document.getElementById('sheet-backdrop').classList.add('open');
   sheet.setAttribute('aria-hidden', 'false'); document.body.classList.add('locked');
-  $$('[data-close]', sheet).forEach(x => x.onclick = closeSheet);
+  $$('[data-close]', sheet).forEach(x => x.onclick = requestCloseSheet);
   sheet.scrollTop = 0;
+  // 调用方会在 openSheet 返回后同步绑定组件，下一轮再取基线。
+  if (guard) setTimeout(() => { if (sheetOpen()) sheetState.baseline = formSnapshot(guardRoot()); }, 0);
   return sheet;
 }
 export function closeSheet() {
   const sheet = document.getElementById('sheet');
-  sheetState.onClose?.(); sheetState.onClose = null;
+  sheetState.onClose?.(); sheetState.onClose = null; sheetState.baseline = null;
   sheet.classList.remove('open'); document.getElementById('sheet-backdrop').classList.remove('open');
   sheet.setAttribute('aria-hidden', 'true'); document.body.classList.remove('locked');
 }
 export const sheetOpen = () => document.getElementById('sheet').classList.contains('open');
+export const sheetDirty = () => sheetOpen() && sheetState.baseline !== null && formSnapshot(guardRoot()) !== sheetState.baseline;
+export const markSheetClean = () => { if (sheetState.baseline !== null) sheetState.baseline = formSnapshot(guardRoot()); };
+// 用户主动关闭（遮罩、Esc、取消按钮）走这里；保存成功后的程序关闭直接用 closeSheet。
+export async function requestCloseSheet() {
+  if (sheetDirty() && !await confirmDialog({title: '放弃未保存的修改？', message: '关闭后，弹层里填写的内容会丢失。', confirmText: '放弃修改', danger: true})) return false;
+  closeSheet();
+  return true;
+}
 export function sheetHead(eyebrow, title, extra = '') {
   return `<header class="sheet-head"><div><p class="eyebrow">${esc(eyebrow)}</p><h2>${esc(title)}</h2>${extra}</div><button class="icon-btn" type="button" data-close aria-label="关闭">${icon('close')}</button></header>`;
 }
 
-// 自绘确认框，替代浏览器 confirm()。
-export function confirmDialog({title, message = '', confirmText = '确定', danger = false}) {
+// 自绘确认框，替代浏览器 confirm()。传 altText 时多一个次要选项，选中返回 'alt'。
+export function confirmDialog({title, message = '', confirmText = '确定', danger = false, altText = ''}) {
   return new Promise(resolve => {
     const root = document.getElementById('dialog');
-    root.innerHTML = `<div class="dialog-card" role="alertdialog" aria-modal="true"><div class="dialog-icon ${danger ? 'danger' : ''}">${icon(danger ? 'alert' : 'info')}</div><h3>${esc(title)}</h3>${message ? `<p>${esc(message)}</p>` : ''}<div class="dialog-actions"><button class="btn" type="button" data-answer="0">取消</button><button class="btn ${danger ? 'danger-solid' : 'primary'}" type="button" data-answer="1">${esc(confirmText)}</button></div></div>`;
+    root.innerHTML = `<div class="dialog-card" role="alertdialog" aria-modal="true"><div class="dialog-icon ${danger ? 'danger' : ''}">${icon(danger ? 'alert' : 'info')}</div><h3>${esc(title)}</h3>${message ? `<p>${esc(message)}</p>` : ''}<div class="dialog-actions ${altText ? 'three' : ''}"><button class="btn" type="button" data-answer="0">取消</button>${altText ? `<button class="btn" type="button" data-answer="alt">${esc(altText)}</button>` : ''}<button class="btn ${danger ? 'danger-solid' : 'primary'}" type="button" data-answer="1">${esc(confirmText)}</button></div></div>`;
     root.classList.add('open');
     const finish = value => { root.classList.remove('open'); root.innerHTML = ''; document.removeEventListener('keydown', key); resolve(value); };
-    const key = e => { if (e.key === 'Escape') finish(false); };
+    const key = e => { if (e.key === 'Escape') { e.stopPropagation(); finish(false); } };
     document.addEventListener('keydown', key);
-    $$('[data-answer]', root).forEach(b => b.onclick = () => finish(b.dataset.answer === '1'));
+    $$('[data-answer]', root).forEach(b => b.onclick = () => finish(b.dataset.answer === 'alt' ? 'alt' : b.dataset.answer === '1'));
     root.onclick = e => { if (e.target === root) finish(false); };
     $('[data-answer="1"]', root).focus();
   });

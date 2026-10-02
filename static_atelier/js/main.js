@@ -1,5 +1,5 @@
 // 页面壳与前端路由。所有 /dashboard、/page/* 地址都由后端返回同一个 app.html。
-import {token, icon, brandMark, esc, $, $$, toast, closeSheet, sheetOpen, confirmDialog, applyTheme, effectiveTheme, setThemePref, logout} from './core.js';
+import {token, icon, brandMark, esc, $, $$, toast, closeSheet, requestCloseSheet, sheetOpen, sheetDirty, confirmDialog, applyTheme, effectiveTheme, setThemePref, logout} from './core.js';
 import {hasUnsaved, clearForm} from './ui.js';
 import {overviewPage} from './pages/overview.js';
 import {routesPage} from './pages/routes.js';
@@ -44,8 +44,8 @@ function shell() {
   $$('[data-theme-toggle], [data-theme-toggle-full]').forEach(b => b.onclick = toggle);
   document.addEventListener('themechange', () => { const b = $('[data-theme-toggle-full]'); if (b) b.innerHTML = `${icon(effectiveTheme() === 'dark' ? 'sun' : 'moon')}<span>${effectiveTheme() === 'dark' ? '浅色模式' : '深色模式'}</span>`; });
   $('[data-logout]').onclick = async () => { if (await confirmDialog({title: '退出登录？', confirmText: '退出'})) logout(); };
-  $('#sheet-backdrop').onclick = closeSheet;
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && sheetOpen() && !$('#dialog').classList.contains('open')) closeSheet(); });
+  $('#sheet-backdrop').onclick = requestCloseSheet;
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && sheetOpen() && !$('#dialog').classList.contains('open')) requestCloseSheet(); });
   applyTheme();
 }
 
@@ -59,11 +59,11 @@ document.addEventListener('click', async e => {
   navigate(url.pathname + url.search + url.hash);
 });
 window.addEventListener('popstate', () => render());
-window.addEventListener('beforeunload', e => { if (hasUnsaved()) { e.preventDefault(); e.returnValue = ''; } });
+window.addEventListener('beforeunload', e => { if (hasUnsaved() || sheetDirty()) { e.preventDefault(); e.returnValue = ''; } });
 document.addEventListener('reload-page', () => render());
 
 export async function navigate(url, {replace = false} = {}) {
-  if (hasUnsaved() && !await confirmDialog({title: '放弃未保存的修改？', message: '离开后，本页尚未保存的配置会丢失。', confirmText: '放弃并离开', danger: true})) return;
+  if ((hasUnsaved() || sheetDirty()) && !await confirmDialog({title: '放弃未保存的修改？', message: '离开后，尚未保存的配置会丢失。', confirmText: '放弃并离开', danger: true})) return;
   clearForm();
   history[replace ? 'replaceState' : 'pushState'](null, '', url);
   render();

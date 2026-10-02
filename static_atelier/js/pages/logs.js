@@ -2,8 +2,8 @@
 import {api, del, esc, icon, fmt, date, shortDate, $, $$, toast, busy, openSheet, sheetHead, confirmDialog, copyText} from '../core.js';
 import {pill, empty, metric, segmented, bindSegmented, segValue, card} from '../ui.js';
 
-const SOURCES = [['main', 'Claude 渠道与 OpenAI', '/page/logs'], ['codex', 'Codex', '/page/codex-logs'], ['claudecode', 'Claude Code', '/page/claudecode-logs']];
-const VIEWS = [['requests', '请求'], ['failures', '失败'], ['usage', '用量']];
+const SOURCES = [['main', 'Claude 渠道 / OpenAI', '/page/logs'], ['codex', 'Codex', '/page/codex-logs'], ['claudecode', 'Claude Code', '/page/claudecode-logs']];
+const VIEWS = [['requests', '请求记录'], ['failures', '错误捕获'], ['usage', '用量']];
 const PAGE = 50;
 
 // 统一两种日志结构，页面只处理一种字段名。
@@ -24,20 +24,24 @@ export async function logsPage(ctx, source, defaultView) {
     ? [['', '全部渠道'], ['openai', 'OpenAI'], ...(await api('/api/channels')).map(c => [String(c.id), c.name])]
     : [['', '全部账号'], ...(await api(`/api/${source}/accounts`)).map(a => [String(a.id), a.name])];
   if (!ctx.alive()) return;
+  // 一行视图切换 + 一行筛选：来源也是筛选条件之一，不再单独占一排标签。
   ctx.app.innerHTML = `<div class="page">
-    <header class="page-head"><div><h1>日志</h1><p>查看每条转发请求、失败原因和 Token 用量。</p></div></header>
-    <div class="route-tabs">${SOURCES.map(([key, label, href]) => `<a href="${href}${view !== 'requests' ? `?view=${view}` : ''}" class="${key === source ? 'active' : ''}">${label}</a>`).join('')}</div>
-    <div class="toolbar">${segmented('log-view', VIEWS, view)}<div class="toolbar-right" id="log-tools"></div></div>
+    <header class="page-head"><div><h1>日志</h1><p>查看每条转发请求、上游错误详情和 Token 用量。</p></div></header>
+    ${segmented('log-view', VIEWS, view)}
+    <div class="toolbar filter-bar"><div class="toolbar-left"><select class="select-sm" id="log-source" aria-label="来源">${SOURCES.map(([key, label]) => `<option value="${key}" ${key === source ? 'selected' : ''}>${label}</option>`).join('')}</select><span id="log-filters" class="toolbar-left"></span></div><div class="toolbar-right" id="log-tools"></div></div>
     <div id="log-content"></div></div>`;
-  bindSegmented('log-view', v => ctx.navigate(`${sourcePath(source)}${v === 'requests' ? '' : `?view=${v}`}`, {replace: true}));
-  if (view === 'failures') return failuresView(ctx, source);
+  const viewQuery = v => v === 'requests' ? '' : `?view=${v}`;
+  bindSegmented('log-view', v => ctx.navigate(`${sourcePath(source)}${viewQuery(v)}`, {replace: true}));
+  $('#log-source').onchange = e => ctx.navigate(`${sourcePath(e.target.value)}${viewQuery(view)}`, {replace: true});
+  if (view === 'failures') return failuresView(ctx, source, filters);
   if (view === 'usage') return usageView(ctx, source, filters);
   return requestsView(ctx, source, filters);
 }
 
 /* ---------- 请求 ---------- */
 async function requestsView(ctx, source, filters) {
-  $('#log-tools').innerHTML = `<select class="select-sm" id="log-filter" aria-label="筛选">${filters.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('')}</select>${segmented('log-status', [['all', '全部'], ['ok', '成功'], ['bad', '失败']], 'all', {small: true})}<button class="icon-btn" type="button" id="log-refresh" aria-label="刷新">${icon('refresh')}</button>`;
+  $('#log-filters').innerHTML = `<select class="select-sm" id="log-filter" aria-label="筛选">${filters.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('')}</select>${segmented('log-status', [['all', '全部状态'], ['ok', '成功'], ['bad', '出错']], 'all', {small: true})}`;
+  $('#log-tools').innerHTML = `<button class="icon-btn" type="button" id="log-refresh" aria-label="刷新" title="刷新">${icon('refresh')}</button>`;
   const content = $('#log-content');
   let rows = []; let offset = 0; let done = false;
   const url = () => {
@@ -49,10 +53,14 @@ async function requestsView(ctx, source, filters) {
     const status = segValue('log-status');
     const list = rows.filter(r => status === 'all' || (status === 'ok') === ok(r.status));
     const whoLabel = source === 'main' ? '渠道' : '账号';
-    content.innerHTML = list.length ? `<div class="card table-card"><div class="table-scroll"><table class="log-table"><thead><tr><th>时间</th><th>${whoLabel}</th><th>模型</th><th class="num">输入</th><th class="num">输出</th><th class="num">缓存（写入/读取）</th><th class="num">耗时</th><th>状态</th></tr></thead><tbody>
-      ${list.map((r, i) => `<tr data-i="${rows.indexOf(r)}" tabindex="0"><td data-label="时间">${shortDate(r.time)}</td><td data-label="${whoLabel}">${esc(r.who)}</td><td data-label="模型" class="mono">${esc(r.model)}${r.effort ? `<span class="tag">${esc(r.effort)}</span>` : ''}</td><td data-label="输入" class="num">${fmt(r.input)}</td><td data-label="输出" class="num">${fmt(r.output)}</td><td data-label="缓存（写入/读取）" class="num">${Number(r.cacheWrite || 0).toLocaleString()} / ${Number(r.cacheRead || 0).toLocaleString()}</td><td data-label="耗时" class="num">${((r.duration || 0) / 1000).toFixed(1)}s</td><td data-label="状态">${statusPill(r.status)}</td></tr>`).join('')}
-      </tbody></table></div></div>${done ? '<p class="hint center">没有更多记录了</p>' : `<div class="center"><button class="btn" type="button" id="log-more">加载更多</button></div>`}`
-      : empty('list', rows.length ? '没有符合条件的请求' : '暂无请求记录', rows.length ? '换个筛选条件试试。' : '客户端发起请求后会显示在这里。');
+    // 状态筛选只作用于已加载的记录，结果为空时也保留「加载更多」，并说明范围。
+    const more = done ? '<p class="hint center">没有更多记录了</p>' : `<div class="center"><button class="btn" type="button" id="log-more">加载更多</button></div>`;
+    const scope = status !== 'all' ? `<p class="hint">在已加载的 ${rows.length} 条记录中筛选${done ? '' : '，加载更多可扩大范围'}。</p>` : '';
+    content.innerHTML = list.length ? `${scope}<div class="card table-card"><div class="table-scroll"><table class="log-table"><thead><tr><th>时间</th><th>${whoLabel}</th><th>模型</th><th class="num">输入</th><th class="num">输出</th><th class="num">缓存（写入/读取）</th><th class="num">耗时</th><th>状态</th></tr></thead><tbody>
+      ${list.map(r => `<tr data-i="${rows.indexOf(r)}" tabindex="0"><td data-label="时间">${shortDate(r.time)}</td><td data-label="${whoLabel}">${esc(r.who)}</td><td data-label="模型" class="mono">${esc(r.model)}${r.effort ? `<span class="tag">${esc(r.effort)}</span>` : ''}</td><td data-label="输入" class="num">${fmt(r.input)}</td><td data-label="输出" class="num">${fmt(r.output)}</td><td data-label="缓存（写入/读取）" class="num">${fmt(r.cacheWrite)} / ${fmt(r.cacheRead)}</td><td data-label="耗时" class="num">${((r.duration || 0) / 1000).toFixed(1)}s</td><td data-label="状态">${statusPill(r.status)}</td></tr>`).join('')}
+      </tbody></table></div></div>${more}`
+      : rows.length ? `${empty('list', '已加载的记录里没有符合条件的请求', done ? '换个筛选条件试试。' : `目前只加载了 ${rows.length} 条，可以继续加载更早的记录。`)}${more}`
+      : empty('list', '暂无请求记录', '客户端发起请求后会显示在这里。');
     $$('tbody tr', content).forEach(tr => { const open = () => requestDetail(source, rows[Number(tr.dataset.i)]); tr.onclick = open; tr.onkeydown = e => { if (e.key === 'Enter') open(); }; });
     if ($('#log-more')) $('#log-more').onclick = e => busy(e.currentTarget, async () => { await load(true); return ''; });
   };
@@ -83,29 +91,33 @@ function requestDetail(source, r) {
 }
 
 /* ---------- 失败 ---------- */
-async function failuresView(ctx, source) {
+async function failuresView(ctx, source, filters) {
   const endpoint = source === 'main' ? '/api/failures' : `/api/${source}/failures`;
-  $('#log-tools').innerHTML = `<button class="icon-btn" type="button" id="fail-refresh" aria-label="刷新">${icon('refresh')}</button><button class="btn small danger" type="button" id="fail-clear">${icon('trash')}清空</button>`;
+  const names = Object.fromEntries(filters.filter(([v]) => v).map(([v, l]) => [v, l]));
+  const title = f => failTitle(source, f, names);
+  $('#log-tools').innerHTML = `<button class="icon-btn" type="button" id="fail-refresh" aria-label="刷新" title="刷新">${icon('refresh')}</button><button class="btn small danger" type="button" id="fail-clear">${icon('trash')}清空</button>`;
   const content = $('#log-content');
   const load = async () => {
     const list = await api(endpoint);
     if (!ctx.alive()) return;
-    content.innerHTML = `<p class="hint">失败记录只保存在内存中，服务重启后会清空。</p>` + (list.length ? `<div class="item-list">${list.map((f, i) => `<article class="item fail" data-i="${i}" tabindex="0"><div class="item-main"><div class="item-title"><strong>${esc(failTitle(source, f))}</strong>${pill('danger', f.upstream_status ? `HTTP ${f.upstream_status}` : '连接失败')}</div><p class="item-sub">${date(f.ts)} · ${f.streaming ? '流式' : '非流式'}${f.body?.model ? ` · ${esc(f.body.model)}` : ''}</p><p class="item-snippet">${esc(String(f.upstream_body || f.error_repr || '').slice(0, 220))}</p></div><span class="item-chevron">${icon('chevron')}</span></article>`).join('')}</div>` : empty('check', '没有失败记录', '当前没有捕获到上游错误。'));
-    $$('.item', content).forEach(el => { const open = () => failDetail(source, list[Number(el.dataset.i)]); el.onclick = open; el.onkeydown = e => { if (e.key === 'Enter') open(); }; });
+    content.innerHTML = `<div class="notice info">${icon('info')}<div><p>这里保存上游出错时的完整请求体和返回内容，便于排查。只保存在内存中，服务重启后清空；请求记录里状态为「出错」的条目不受影响。</p></div></div>` + (list.length ? `<div class="item-list">${list.map((f, i) => `<article class="item fail" data-i="${i}" tabindex="0"><div class="item-main"><div class="item-title"><strong>${esc(title(f))}</strong>${pill('danger', f.upstream_status ? `HTTP ${f.upstream_status}` : '连接失败')}</div><p class="item-sub">${date(f.ts)} · ${f.streaming ? '流式' : '非流式'}${f.body?.model ? ` · ${esc(f.body.model)}` : ''}</p><p class="item-snippet">${esc(String(f.upstream_body || f.error_repr || '').slice(0, 220))}</p></div><span class="item-chevron">${icon('chevron')}</span></article>`).join('')}</div>` : empty('check', '没有捕获到错误', '当前没有上游错误记录。'));
+    $$('.item', content).forEach(el => { const open = () => failDetail(title(list[Number(el.dataset.i)]), list[Number(el.dataset.i)]); el.onclick = open; el.onkeydown = e => { if (e.key === 'Enter') open(); }; });
     $('#fail-clear').disabled = !list.length;
   };
   $('#fail-refresh').onclick = e => busy(e.currentTarget, async () => { await load(); return '已刷新'; });
   $('#fail-clear').onclick = async () => {
-    if (!await confirmDialog({title: '清空失败记录？', message: '只清空当前来源的失败记录，请求日志不受影响。', confirmText: '清空', danger: true})) return;
-    try { await del(endpoint); toast('失败记录已清空'); load(); } catch (e) { toast(e.message, true); }
+    if (!await confirmDialog({title: '清空错误捕获？', message: '只清空当前来源的错误捕获，请求记录不受影响。', confirmText: '清空', danger: true})) return;
+    try { await del(endpoint); toast('错误捕获已清空'); load(); } catch (e) { toast(e.message, true); }
   };
   await load();
 }
-const failTitle = (source, f) => source === 'main' ? `${f.channel || '未知渠道'}${f.error_type ? ` · ${f.error_type}` : ''}` : `账号 #${f.account_id}${f.error_type ? ` · ${f.error_type}` : ''}`;
+const failTitle = (source, f, names) => source === 'main'
+  ? `${f.channel || '未知渠道'}${f.error_type ? ` · ${f.error_type}` : ''}`
+  : `${names[String(f.account_id)] || `账号 #${f.account_id}`}${f.error_type ? ` · ${f.error_type}` : ''}`;
 
-function failDetail(source, f) {
+function failDetail(titleText, f) {
   const body = JSON.stringify(f.body || {}, null, 2);
-  const sheet = openSheet(`${sheetHead('失败请求', failTitle(source, f))}<div class="sheet-body">
+  const sheet = openSheet(`${sheetHead('错误详情', titleText)}<div class="sheet-body">
     <dl class="detail"><div><dt>时间</dt><dd>${date(f.ts)}</dd></div><div><dt>上游状态</dt><dd>${esc(f.upstream_status || '连接失败')}</dd></div><div><dt>模式</dt><dd>${f.streaming ? '流式' : '非流式'}</dd></div>${f.error_type ? `<div><dt>错误类型</dt><dd>${esc(f.error_type)}</dd></div>` : ''}</dl>
     <section class="form-section"><div class="row-between"><h4>完整上游请求体</h4><button class="btn small ghost" type="button" id="copy-body">${icon('copy')}复制</button></div><pre class="code-block failure-request">${esc(body)}</pre></section>
     <section class="form-section"><div class="row-between"><h4>上游返回</h4></div><pre class="code-block">${esc(f.upstream_body || f.error_repr || '（无）')}</pre></section></div>`, {wide: true});
@@ -122,12 +134,12 @@ async function usageView(ctx, source, filters) {
     const sum = k => rows.reduce((n, r) => n + Number(r[k] || 0), 0);
     const byAccount = {};
     rows.forEach(r => { const a = byAccount[r.who] ||= {n: 0, input: 0, output: 0}; a.n++; a.input += Number(r.input || 0); a.output += Number(r.output || 0); });
-    content.innerHTML = `<p class="hint">Codex 按最近 ${rows.length} 条请求统计。</p><div class="metrics">${metric('请求', rows.length)}${metric('输入', sum('input'))}${metric('输出', sum('output'))}${metric('推理', sum('reasoning'))}${metric('缓存读取', sum('cacheRead'))}</div>
+    content.innerHTML = `<div class="notice info">${icon('info')}<div><p>Codex 用量按最近 ${rows.length} 条请求记录统计，不是全部历史。</p></div></div><div class="metrics">${metric('请求', rows.length)}${metric('输入', sum('input'))}${metric('输出', sum('output'))}${metric('推理', sum('reasoning'))}${metric('缓存读取', sum('cacheRead'))}</div>
       ${Object.keys(byAccount).length ? card('按账号', `<div class="bars">${barList(Object.entries(byAccount).map(([k, v]) => [k, v.input + v.output, `${v.n} 次`]))}</div>`) : ''}`;
     return;
   }
   const accountFilter = source === 'claudecode';
-  $('#log-tools').innerHTML = `<select class="select-sm" id="usage-filter" aria-label="筛选">${filters.filter(([v]) => v !== 'openai').map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('')}</select>`;
+  $('#log-filters').innerHTML = `<select class="select-sm" id="usage-filter" aria-label="筛选">${filters.filter(([v]) => v !== 'openai').map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('')}</select>`;
   const load = async () => {
     const f = $('#usage-filter').value;
     const [u, oai] = await Promise.all([

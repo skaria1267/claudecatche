@@ -78,6 +78,17 @@ export async function overviewPage(ctx) {
   if (failTotal) issues.push({tone: 'warn', text: `最近有 ${failTotal} 条失败请求`, href: '/page/logs?view=failures'});
 
   const origin = location.origin;
+  // 新手引导只在四个路由都没配置时出现；配置后换成接入速查，不再长期占位。
+  const fresh = routes.every(r => r.empty);
+  const keyRow = access?.value ? copyRow('访问密钥', access.value, {secret: true}) : '<p class="hint">尚未设置访问密钥，请到「设置」中设置。</p>';
+  const quick = `<section class="card quick-card"><header class="card-head"><div class="card-title"><span class="card-ico">${icon('key')}</span><div><h3>接入速查</h3><p>所有路由共用访问密钥；各路由的地址和配置片段在它的「接入方式」里。</p></div></div></header>
+    <div class="card-body">${keyRow}<div class="row-actions wrap"><a class="btn small" href="/page/claudecode?tab=access">Claude Code${icon('arrow')}</a><a class="btn small" href="/page/codex?tab=access">Codex${icon('arrow')}</a><a class="btn small" href="/page/settings#guide">全部接入指引${icon('arrow')}</a></div></div></section>`;
+  const steps = `<div class="section-head"><h2>三步开始使用</h2><p>配置好上游后，把下面的信息填进客户端即可。</p></div>
+    <ol class="steps">
+      <li><span class="step-no">1</span><div><strong>配置上游</strong><p>在「路由」里添加渠道、填写 OpenAI Key，或添加订阅账号并完成登录。</p><a class="btn small" href="/page/channels">前往路由${icon('arrow')}</a></div></li>
+      <li><span class="step-no">2</span><div><strong>复制访问密钥</strong><p>所有路由共用这一把密钥，客户端里填在 API Key 的位置。</p>${keyRow}</div></li>
+      <li><span class="step-no">3</span><div><strong>填入客户端</strong><p>按路由选择接入地址，例如 Claude Code 订阅填 <code>${esc(origin)}/claudecode</code>。</p><a class="btn small" href="/page/settings#guide">查看接入指引${icon('arrow')}</a></div></li>
+    </ol>`;
 
   ctx.app.innerHTML = `<div class="page">
     <div class="route-grid overview-routes">${routes.map(r => `<a class="route-card" href="${r.href}">
@@ -88,12 +99,7 @@ export async function overviewPage(ctx) {
 
     ${issues.length ? `<section class="card attention"><header class="card-head"><div class="card-title"><span class="card-ico warn">${icon('alert')}</span><div><h3>需要注意</h3><p>${issues.length} 项待处理，点击直接前往</p></div></div></header><div class="issue-list">${issues.map(i => `<a class="issue ${i.tone}" href="${i.href}"><i></i><span>${esc(i.text)}</span>${icon('chevron')}</a>`).join('')}</div></section>` : `<section class="card all-good"><span class="card-ico ok">${icon('check')}</span><div><strong>一切正常</strong><p>没有需要处理的账号或失败请求。</p></div></section>`}
 
-    <div class="section-head"><h2>三步开始使用</h2><p>配置好上游后，把下面的信息填进客户端即可。</p></div>
-    <ol class="steps">
-      <li><span class="step-no">1</span><div><strong>配置上游</strong><p>在「路由」里添加渠道、填写 OpenAI Key，或添加订阅账号并完成登录。</p><a class="btn small" href="/page/channels">前往路由${icon('arrow')}</a></div></li>
-      <li><span class="step-no">2</span><div><strong>复制访问密钥</strong><p>所有路由共用这一把密钥，客户端里填在 API Key 的位置。</p>${access?.value ? copyRow('访问密钥', access.value, {secret: true}) : '<p class="hint">尚未设置访问密钥，请到「设置」中设置。</p>'}</div></li>
-      <li><span class="step-no">3</span><div><strong>填入客户端</strong><p>按路由选择接入地址，例如 Claude Code 订阅填 <code>${esc(origin)}/claudecode</code>。</p><a class="btn small" href="/page/settings#guide">查看接入指引${icon('arrow')}</a></div></li>
-    </ol>
+    ${fresh ? steps : quick}
   </div>`;
   bindCopy(ctx.app);
 }
