@@ -4,6 +4,7 @@ import time
 import aiosqlite
 
 from database import get_db
+from services.usage_filters import usage_where
 from services.secret_store import open_secret, seal
 
 
@@ -155,9 +156,9 @@ async def list_requests(account_id: int | None = None, limit: int = 100,
             return [dict(row) for row in await cursor.fetchall()]
 
 
-async def usage_summary(account_id: int | None = None) -> dict:
-    where = " WHERE account_id = ?" if account_id else ""
-    params = (account_id,) if account_id else ()
+async def usage_summary(account_id: int | None = None, start_at: int | None = None,
+                        end_at: int | None = None) -> dict:
+    where, params = usage_where(start_at, end_at, account_id=account_id)
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(

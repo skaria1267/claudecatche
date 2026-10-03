@@ -4,6 +4,7 @@ import time
 import aiosqlite
 
 from database import get_db
+from services.usage_filters import usage_where
 from services.secret_store import open_secret, seal
 
 
@@ -150,3 +151,31 @@ async def list_requests(account_id: int | None = None, limit: int = 100,
         db.row_factory = aiosqlite.Row
         async with db.execute(query, params) as cursor:
             return [dict(row) for row in await cursor.fetchall()]
+
+
+async def usage_summary(account_id: int | None = None, start_at: int | None = None,
+                        end_at: int | None = None) -> dict:
+    where, params = usage_where(start_at, end_at, account_id=account_id, alias="r")
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            f"""SELECT COUNT(*) total_requests,
+                       COALESCE(SUM(r.prompt_tokens), 0) total_input,
+                       COALESCE(SUM(r.completion_tokens), 0) total_output,
+                       COALESCE(SUM(r.cache_write_tokens), 0) total_cache_creation,
+                       COALESCE(SUM(r.cached_tokens), 0) total_cache_read,
+                       COALESCE(SUM(r.reasoning_tokens), 0) total_reasoning,
+                       MIN(r.request_at) first_request, MAX(r.request_at) last_request
+                FROM codex_requests r{where}""", params,
+        ) as cursor:
+            result = dict(await cursor.fetchone())
+        async with db.execute(
+            f"""SELECT r.account_id, a.name account_name, COUNT(*) total_requests,
+                       COALESCE(SUM(r.prompt_tokens), 0) total_input,
+                       COALESCE(SUM(r.completion_tokens), 0) total_output
+                FROM codex_requests r LEFT JOIN codex_accounts a ON a.id = r.account_id
+                {where} GROUP BY r.account_id, a.name
+                ORDER BY total_input + total_output DESC""", params,
+        ) as cursor:
+            result["by_account"] = [dict(row) for row in await cursor.fetchall()]
+        return result

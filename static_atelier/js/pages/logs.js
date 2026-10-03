@@ -30,7 +30,14 @@ export async function logsPage(ctx, source, defaultView) {
     ${segmented('log-view', VIEWS, view)}
     <div class="toolbar filter-bar"><div class="toolbar-left"><select class="select-sm" id="log-source" aria-label="来源">${SOURCES.map(([key, label]) => `<option value="${key}" ${key === source ? 'selected' : ''}>${label}</option>`).join('')}</select><span id="log-filters" class="toolbar-left"></span></div><div class="toolbar-right" id="log-tools"></div></div>
     <div id="log-content"></div></div>`;
-  const viewQuery = v => v === 'requests' ? '' : `?view=${v}`;
+  const viewQuery = v => {
+    if (v === 'requests') return '';
+    const query = new URLSearchParams({view: v});
+    if (v === 'usage') for (const key of ['range', 'start_at', 'end_at']) {
+      if (ctx.params.has(key)) query.set(key, ctx.params.get(key));
+    }
+    return `?${query}`;
+  };
   bindSegmented('log-view', v => ctx.navigate(`${sourcePath(source)}${viewQuery(v)}`, {replace: true}));
   $('#log-source').onchange = e => ctx.navigate(`${sourcePath(e.target.value)}${viewQuery(view)}`, {replace: true});
   if (view === 'failures') return failuresView(ctx, source, filters);
@@ -127,35 +134,106 @@ function failDetail(titleText, f) {
 /* ---------- 用量 ---------- */
 async function usageView(ctx, source, filters) {
   const content = $('#log-content');
-  if (source === 'codex') {
-    $('#log-tools').innerHTML = '';
-    const rows = (await api('/api/codex/logs?limit=500')).map(r => normalize('codex', r));
-    if (!ctx.alive()) return;
-    const sum = k => rows.reduce((n, r) => n + Number(r[k] || 0), 0);
-    const byAccount = {};
-    rows.forEach(r => { const a = byAccount[r.who] ||= {n: 0, input: 0, output: 0}; a.n++; a.input += Number(r.input || 0); a.output += Number(r.output || 0); });
-    content.innerHTML = `<div class="notice info">${icon('info')}<div><p>Codex 用量按最近 ${rows.length} 条请求记录统计，不是全部历史。</p></div></div><div class="metrics">${metric('请求', rows.length)}${metric('输入', sum('input'))}${metric('输出', sum('output'))}${metric('推理', sum('reasoning'))}${metric('缓存读取', sum('cacheRead'))}</div>
-      ${Object.keys(byAccount).length ? card('按账号', `<div class="bars">${barList(Object.entries(byAccount).map(([k, v]) => [k, v.input + v.output, `${v.n} 次`]))}</div>`) : ''}`;
-    return;
+  const ranges = [['all', '全部时间'], ['today', '今天'], ['7d', '近 7 天'], ['30d', '近 30 天'], ['custom', '自定义']];
+  const savedRange = ctx.params.get('range') || (ctx.params.has('start_at') || ctx.params.has('end_at') ? 'custom' : 'all');
+  const initialRange = ranges.some(([v]) => v === savedRange) ? savedRange : 'all';
+  const filter = ctx.params.get('filter') || '';
+  $('#log-filters').innerHTML = `<select class="select-sm" id="usage-filter" aria-label="筛选">${filters.map(([v, l]) => `<option value="${esc(v)}" ${v === filter ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+  $('#log-tools').innerHTML = `<button class="icon-btn" type="button" id="usage-refresh" aria-label="刷新" title="刷新">${icon('refresh')}</button>`;
+  content.insertAdjacentHTML('beforebegin', `<form class="usage-period" id="usage-period">
+    <label class="field"><span class="label">时间范围</span><select id="usage-range">${ranges.map(([v, l]) => `<option value="${v}" ${v === initialRange ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    <div class="usage-dates" id="usage-dates"><label class="field"><span class="label">起始时间</span><input type="datetime-local" step="1" id="usage-start"></label><label class="field"><span class="label">结束时间</span><input type="datetime-local" step="1" id="usage-end"></label></div>
+    <button class="btn" type="submit" id="usage-apply">${icon('filter')}应用</button></form>`);
+  const form = $('#usage-period'), range = $('#usage-range'), start = $('#usage-start'), end = $('#usage-end');
+  const preset = () => {
+    const now = new Date(), first = new Date(now);
+    first.setHours(0, 0, 0, 0);
+    if (range.value === '7d') first.setDate(first.getDate() - 6);
+    if (range.value === '30d') first.setDate(first.getDate() - 29);
+    start.value = localDateTime(first); end.value = localDateTime(now);
+  };
+  const showDates = () => {
+    $('#usage-dates').hidden = range.value === 'all';
+    start.required = end.required = range.value !== 'all';
+  };
+  preset();
+  if (initialRange === 'custom') {
+    for (const [key, input] of [['start_at', start], ['end_at', end]]) {
+      if (!ctx.params.has(key)) continue;
+      const stamp = Number(ctx.params.get(key)), value = new Date(stamp * 1000);
+      if (Number.isFinite(stamp) && stamp >= 0 && !Number.isNaN(value.getTime())) input.value = localDateTime(value);
+    }
   }
-  const accountFilter = source === 'claudecode';
-  $('#log-filters').innerHTML = `<select class="select-sm" id="usage-filter" aria-label="筛选">${filters.filter(([v]) => v !== 'openai').map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('')}</select>`;
+  showDates();
+  let sequence = 0;
   const load = async () => {
+    const mode = range.value;
+    if (mode !== 'all' && mode !== 'custom') preset();
+    if (!form.reportValidity()) return '';
+    const query = new URLSearchParams();
+    let from = null, until = null;
+    if (mode !== 'all') {
+      from = Math.floor(new Date(start.value).getTime() / 1000);
+      until = Math.floor(new Date(end.value).getTime() / 1000);
+      if (!Number.isFinite(from) || !Number.isFinite(until) || from < 0 || until < 0 || from > until) throw new Error('请选择有效的起止时间，起始时间不能晚于结束时间');
+      query.set('start_at', from); query.set('end_at', until);
+    }
     const f = $('#usage-filter').value;
+    const request = (path, key = '') => {
+      const params = new URLSearchParams(query);
+      if (key && f) params.set(key, f);
+      return api(`${path}${params.size ? `?${params}` : ''}`);
+    };
+    const current = ++sequence;
     const [u, oai] = await Promise.all([
-      api(accountFilter ? `/api/claudecode/usage-summary${f ? `?account_id=${f}` : ''}` : `/api/usage${f ? `?channel_id=${f}` : ''}`),
-      source === 'main' && !f ? api('/api/openai/usage').catch(() => null) : null,
+      source === 'codex' ? request('/api/codex/usage-summary', 'account_id')
+        : source === 'claudecode' ? request('/api/claudecode/usage-summary', 'account_id')
+        : f === 'openai' ? request('/api/openai/usage') : request('/api/usage', 'channel_id'),
+      source === 'main' && !f ? request('/api/openai/usage') : null,
     ]);
-    if (!ctx.alive()) return;
+    if (!ctx.alive() || current !== sequence) return '';
+    ctx.params.set('view', 'usage'); ctx.params.set('range', mode);
+    for (const key of ['start_at', 'end_at']) {
+      if (query.has(key)) ctx.params.set(key, query.get(key)); else ctx.params.delete(key);
+    }
+    if (f) ctx.params.set('filter', f); else ctx.params.delete('filter');
+    history.replaceState(null, '', `${ctx.path}?${ctx.params}`);
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const scope = `<p class="hint">${from === null ? '全部时间' : `${date(from)} 至 ${date(until)}`} · ${esc(zone)}</p>`;
+    if (source === 'main' && f === 'openai') {
+      content.innerHTML = scope + openaiUsage(u);
+      return '';
+    }
+    if (source === 'codex') {
+      content.innerHTML = `${scope}<div class="metrics">${metric('请求', u.total_requests)}${metric('输入', u.total_input)}${metric('输出', u.total_output)}${metric('推理', u.total_reasoning)}${metric('缓存写入', u.total_cache_creation)}${metric('缓存读取', u.total_cache_read)}</div>
+        ${u.by_account.length ? card('按账号', `<div class="bars">${barList(u.by_account.map(a => [a.account_name || `账号 #${a.account_id}`, a.total_input + a.total_output, `${a.total_requests} 次`]))}</div>`) : ''}<p class="hint">${usageSpan(u)}</p>`;
+      return '';
+    }
     const input = (u.total_input || 0) + (u.total_cache_creation || 0) + (u.total_cache_read || 0);
     const hit = input ? Math.round((u.total_cache_read || 0) / input * 100) : 0;
-    content.innerHTML = `<div class="metrics">${metric('请求', u.total_requests)}${metric('总输入', input, '含缓存读写')}${metric('输出', u.total_output)}${metric('缓存命中率', `${hit}%`, '缓存读取 / 总输入', true)}</div>
-      ${card(source === 'main' ? 'Claude 渠道明细' : 'Claude Code 明细', `<div class="bars">${barList([['原始输入', u.total_input], ['缓存写入', u.total_cache_creation], ['缓存读取', u.total_cache_read], ['输出', u.total_output]])}</div><p class="hint">统计区间：${date(u.first_request)} 至 ${date(u.last_request)}</p>`)}
-      ${oai ? card('OpenAI', `<div class="metrics inner">${metric('请求', oai.total_requests)}${metric('输入', oai.prompt_tokens)}${metric('输出', oai.completion_tokens)}${metric('推理', oai.reasoning_tokens)}${metric('缓存命中', oai.cached_tokens)}</div>`) : ''}`;
+    content.innerHTML = `${scope}<div class="metrics">${metric('请求', u.total_requests)}${metric('总输入', input, '含缓存读写')}${metric('输出', u.total_output)}${metric('缓存命中率', `${hit}%`, '缓存读取 / 总输入', true)}</div>
+      ${card(source === 'main' ? 'Claude 渠道明细' : 'Claude Code 明细', `<div class="bars">${barList([['原始输入', u.total_input], ['缓存写入', u.total_cache_creation], ['缓存读取', u.total_cache_read], ['输出', u.total_output]])}</div><p class="hint">${usageSpan(u)}</p>`)}
+      ${oai ? card('OpenAI', openaiUsage(oai)) : ''}`;
+    return '';
   };
-  $('#usage-filter').onchange = load;
+  const refresh = () => load().catch(e => { if (ctx.alive()) toast(e.message, true); });
+  range.onchange = () => {
+    showDates();
+    if (range.value === 'custom') return;
+    refresh();
+  };
+  start.oninput = end.oninput = () => { range.value = 'custom'; };
+  form.onsubmit = e => { e.preventDefault(); busy($('#usage-apply'), load); };
+  $('#usage-filter').onchange = refresh;
+  $('#usage-refresh').onclick = e => busy(e.currentTarget, load);
   await load();
 }
+function localDateTime(value) {
+  const pad = n => String(n).padStart(2, '0');
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`;
+}
+const usageSpan = u => u.total_requests ? `有记录的时间：${date(u.first_request)} 至 ${date(u.last_request)}` : '该时间范围内暂无请求记录';
+const openaiUsage = u => `<div class="metrics">${metric('请求', u.total_requests)}${metric('输入', u.prompt_tokens)}${metric('输出', u.completion_tokens)}${metric('推理', u.reasoning_tokens)}${metric('缓存写入', u.cache_write_tokens)}${metric('缓存读取', u.cached_tokens)}</div><p class="hint">${usageSpan(u)}</p>`;
 function barList(items) {
   const max = Math.max(1, ...items.map(([, v]) => Number(v || 0)));
   return items.map(([label, v, note]) => `<div class="bar-row"><div class="bar-label"><span>${esc(label)}</span><strong>${fmt(v)}${note ? ` <small>${esc(note)}</small>` : ''}</strong></div><div class="bar"><i class="ok" style="width:${Number(v || 0) / max * 100}%"></i></div></div>`).join('');

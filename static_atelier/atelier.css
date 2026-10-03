@@ -327,6 +327,12 @@ details.advanced>*:not(summary){margin-top:14px}
 .toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .toolbar-right,.toolbar-left{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .toolbar>.hint{flex:1;min-width:200px}
+.usage-period{display:grid;grid-template-columns:minmax(140px,180px) minmax(0,1fr) auto;align-items:end;gap:12px;margin:16px 0}
+.usage-dates{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;min-width:0}
+.usage-dates input{min-width:0;max-width:100%}
+.usage-period>.btn{justify-self:start}
+@media(max-width:760px){.usage-period{grid-template-columns:minmax(0,1fr) auto}.usage-dates{grid-column:1/-1;grid-row:2}.usage-period>.btn{grid-column:2;grid-row:1}}
+@media(max-width:480px){.usage-dates{grid-template-columns:minmax(0,1fr)}}
 #log-view{align-self:flex-start}
 .search{display:flex;align-items:center;gap:8px;flex:1;max-width:420px;padding:0 12px;border-radius:var(--r);border:1px solid var(--border-strong);background:var(--surface);color:var(--text-3)}
 .search:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}

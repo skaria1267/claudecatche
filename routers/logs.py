@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header
 from models import get_request_logs, get_usage_summary
 from routers.auth import verify_token
 from services.upstream import get_recent_failures, clear_failures
+from services.usage_filters import usage_period
 
 router = APIRouter()
 
@@ -22,10 +23,11 @@ async def list_logs(channel_id: int = None, source: str = "all",
 
 
 @router.get("/api/usage")
-async def usage_summary(channel_id: int = None, authorization: str = Header(None)):
+async def usage_summary(channel_id: int = None, authorization: str = Header(None),
+                        period: dict = Depends(usage_period)):
     if not await verify_token(_auth(authorization)):
         raise HTTPException(status_code=401)
-    return await get_usage_summary(channel_id=channel_id)
+    return await get_usage_summary(channel_id=channel_id, **period)
 
 
 @router.get("/api/failures")

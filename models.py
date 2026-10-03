@@ -1,5 +1,6 @@
 import aiosqlite
 from database import get_db
+from services.usage_filters import usage_where
 
 # ========== 渠道 ==========
 
@@ -150,7 +151,9 @@ async def get_request_logs(channel_id: int = None, source: str = "all",
             return [dict(row) for row in await cursor.fetchall()]
 
 
-async def get_usage_summary(channel_id: int = None):
+async def get_usage_summary(channel_id: int = None, start_at: int | None = None,
+                            end_at: int | None = None):
+    where, params = usage_where(start_at, end_at, channel_id=channel_id)
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
         cols = """
@@ -162,14 +165,8 @@ async def get_usage_summary(channel_id: int = None):
             MIN(request_at) as first_request,
             MAX(request_at) as last_request
         """
-        if channel_id:
-            async with db.execute(
-                f"SELECT {cols} FROM requests WHERE channel_id = ?", (channel_id,)
-            ) as cursor:
-                row = await cursor.fetchone()
-        else:
-            async with db.execute(f"SELECT {cols} FROM requests") as cursor:
-                row = await cursor.fetchone()
+        async with db.execute(f"SELECT {cols} FROM requests{where}", params) as cursor:
+            row = await cursor.fetchone()
         return dict(row) if row else {}
 
 
@@ -231,16 +228,19 @@ async def add_openai_request_log(model: str, prompt_tokens: int,
         await db.commit()
 
 
-async def get_openai_usage():
+async def get_openai_usage(start_at: int | None = None, end_at: int | None = None):
+    where, params = usage_where(start_at, end_at)
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("""
+        async with db.execute(f"""
             SELECT COUNT(*) AS total_requests,
                    COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                    COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                    COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
                    COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
-                   COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens
-            FROM openai_requests
-        """) as cursor:
+                   COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+                   MIN(request_at) AS first_request,
+                   MAX(request_at) AS last_request
+            FROM openai_requests{where}
+        """, params) as cursor:
             return dict(await cursor.fetchone())

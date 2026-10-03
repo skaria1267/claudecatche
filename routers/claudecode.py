@@ -3,11 +3,12 @@ import time
 from collections import defaultdict, deque
 
 import httpx
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from models import get_setting, set_setting
 from routers.auth import verify_token
+from services.usage_filters import usage_period
 from services import claudecode_store, claudecode_client
 from services.claudecode_auth import CLAUDE_BASE, account_info, account_usage, valid_token
 from services.claudecode_request_builder import client_models, prepare
@@ -282,9 +283,10 @@ async def request_logs(account_id: int = None, limit: int = 100, offset: int = 0
 
 
 @router.get("/api/claudecode/usage-summary")
-async def usage_summary(account_id: int = None, authorization: str = Header(None)):
+async def usage_summary(account_id: int = None, authorization: str = Header(None),
+                        period: dict = Depends(usage_period)):
     await _admin(authorization)
-    return await claudecode_store.usage_summary(account_id)
+    return await claudecode_store.usage_summary(account_id, **period)
 
 
 @router.get("/api/claudecode/failures")

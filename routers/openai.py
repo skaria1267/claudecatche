@@ -2,11 +2,12 @@ import json
 import time
 
 import httpx
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from models import get_openai_config, get_openai_usage, get_setting, update_openai_config
 from routers.auth import verify_token
+from services.usage_filters import usage_period
 from services.openai_request_builder import build_client_models, prepare_openai_request
 from services.openai_upstream import (
     build_openai_headers,
@@ -192,9 +193,10 @@ async def test_openai_connection(req: OpenAIConnectionRequest,
 
 
 @router.get("/api/openai/usage")
-async def openai_usage(authorization: str = Header(None)):
+async def openai_usage(authorization: str = Header(None),
+                       period: dict = Depends(usage_period)):
     await _require_admin(authorization)
-    return await get_openai_usage()
+    return await get_openai_usage(**period)
 
 
 @router.get("/gpt/v1/models")

@@ -2,11 +2,12 @@ import asyncio
 import json
 import time
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from models import get_setting, set_setting
 from routers.auth import verify_token
+from services.usage_filters import usage_period
 from services import codex_client, codex_store
 from services.codex_auth import (
     authcode_complete, authcode_start, device_poll, device_start, valid_token,
@@ -286,6 +287,13 @@ async def logs(account_id: int = None, limit: int = 100, offset: int = 0,
                authorization: str = Header(None)):
     await _admin(authorization)
     return await codex_store.list_requests(account_id, limit, offset)
+
+
+@router.get("/api/codex/usage-summary")
+async def usage_summary(account_id: int = None, authorization: str = Header(None),
+                        period: dict = Depends(usage_period)):
+    await _admin(authorization)
+    return await codex_store.usage_summary(account_id, **period)
 
 
 @router.get("/api/codex/failures")
