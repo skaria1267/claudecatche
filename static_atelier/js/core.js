@@ -96,7 +96,25 @@ export async function copyText(text, label = '已复制') {
 
 // 底部弹层（手机）/ 右侧抽屉（桌面）。关闭时执行 onClose 以停止轮询等后台任务。
 // guard 为真时记录表单快照（只看 [data-guard] 区域，忽略 [data-no-dirty]），有修改时关闭前先确认。
-const sheetState = {onClose: null, baseline: null};
+const sheetState = {onClose: null, baseline: null, returnFocus: null};
+// 弹层和确认框打开时，Tab 只在其内部循环；关闭后焦点回到打开前的元素。
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]):not([type=hidden]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+const focusables = root => $$(FOCUSABLE, root).filter(el => el.getClientRects().length);
+function trapTab(e, root) {
+  const items = focusables(root);
+  if (!items.length) { e.preventDefault(); return; }
+  const first = items[0], last = items[items.length - 1];
+  if (!root.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+  else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+}
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Tab') return;
+  const dialog = document.getElementById('dialog');
+  if (dialog?.classList.contains('open')) trapTab(e, dialog);
+  else if (sheetOpen()) trapTab(e, document.getElementById('sheet'));
+});
+const restoreFocus = el => { if (el?.isConnected && typeof el.focus === 'function') el.focus({preventScroll: true}); };
 const formSnapshot = root => {
   if (!root) return '';
   const fields = $$('input,select,textarea', root).filter(el => !el.closest('[data-no-dirty]')).map(el => el.type === 'checkbox' ? el.checked : el.value);
@@ -106,6 +124,8 @@ const formSnapshot = root => {
 const guardRoot = () => { const sheet = document.getElementById('sheet'); return $('[data-guard]', sheet); };
 export function openSheet(html, {wide = false, onClose = null, guard = false} = {}) {
   const sheet = document.getElementById('sheet');
+  // 弹层之间直接切换时保留最初的触发元素。
+  if (!sheetOpen()) sheetState.returnFocus = document.activeElement;
   sheetState.onClose?.();
   sheetState.onClose = onClose;
   sheetState.baseline = null;
@@ -115,15 +135,18 @@ export function openSheet(html, {wide = false, onClose = null, guard = false} = 
   sheet.setAttribute('aria-hidden', 'false'); document.body.classList.add('locked');
   $$('[data-close]', sheet).forEach(x => x.onclick = requestCloseSheet);
   sheet.scrollTop = 0;
+  sheet.focus({preventScroll: true});
   // 调用方会在 openSheet 返回后同步绑定组件，下一轮再取基线。
   if (guard) setTimeout(() => { if (sheetOpen()) sheetState.baseline = formSnapshot(guardRoot()); }, 0);
   return sheet;
 }
 export function closeSheet() {
   const sheet = document.getElementById('sheet');
+  const wasOpen = sheetOpen();
   sheetState.onClose?.(); sheetState.onClose = null; sheetState.baseline = null;
   sheet.classList.remove('open'); document.getElementById('sheet-backdrop').classList.remove('open');
   sheet.setAttribute('aria-hidden', 'true'); document.body.classList.remove('locked');
+  if (wasOpen) { const back = sheetState.returnFocus; sheetState.returnFocus = null; restoreFocus(back); }
 }
 export const sheetOpen = () => document.getElementById('sheet').classList.contains('open');
 export const sheetDirty = () => sheetOpen() && sheetState.baseline !== null && formSnapshot(guardRoot()) !== sheetState.baseline;
@@ -142,9 +165,10 @@ export function sheetHead(eyebrow, title, extra = '') {
 export function confirmDialog({title, message = '', confirmText = '确定', danger = false, altText = ''}) {
   return new Promise(resolve => {
     const root = document.getElementById('dialog');
+    const back = document.activeElement;
     root.innerHTML = `<div class="dialog-card" role="alertdialog" aria-modal="true"><div class="dialog-icon ${danger ? 'danger' : ''}">${icon(danger ? 'alert' : 'info')}</div><h3>${esc(title)}</h3>${message ? `<p>${esc(message)}</p>` : ''}<div class="dialog-actions ${altText ? 'three' : ''}"><button class="btn" type="button" data-answer="0">取消</button>${altText ? `<button class="btn" type="button" data-answer="alt">${esc(altText)}</button>` : ''}<button class="btn ${danger ? 'danger-solid' : 'primary'}" type="button" data-answer="1">${esc(confirmText)}</button></div></div>`;
     root.classList.add('open');
-    const finish = value => { root.classList.remove('open'); root.innerHTML = ''; document.removeEventListener('keydown', key); resolve(value); };
+    const finish = value => { root.classList.remove('open'); root.innerHTML = ''; document.removeEventListener('keydown', key); restoreFocus(back); resolve(value); };
     const key = e => { if (e.key === 'Escape') { e.stopPropagation(); finish(false); } };
     document.addEventListener('keydown', key);
     $$('[data-answer]', root).forEach(b => b.onclick = () => finish(b.dataset.answer === 'alt' ? 'alt' : b.dataset.answer === '1'));

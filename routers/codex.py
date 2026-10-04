@@ -284,9 +284,10 @@ async def use_reset_credit(account_id: int, req: ResetCreditConsume,
 
 @router.get("/api/codex/logs")
 async def logs(account_id: int = None, limit: int = 100, offset: int = 0,
-               authorization: str = Header(None)):
+               status: str = None, q: str = None, authorization: str = Header(None),
+               period: dict = Depends(usage_period)):
     await _admin(authorization)
-    return await codex_store.list_requests(account_id, limit, offset)
+    return await codex_store.list_requests(account_id, limit, offset, status=status, q=q, **period)
 
 
 @router.get("/api/codex/usage-summary")

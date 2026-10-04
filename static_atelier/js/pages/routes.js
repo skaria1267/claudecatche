@@ -1,7 +1,7 @@
 // 路由页：Claude 渠道 / OpenAI / Codex / Claude Code 四个分区。
 // 规则：列表与标题栏上的开关点击即生效；弹层和表单里的其他内容一律显式保存。
-import {api, post, patch, del, esc, icon, fmt, date, parseModels, parseRules, on, $, $$, toast, busy, openSheet, closeSheet, sheetHead, confirmDialog} from '../core.js';
-import {pill, field, card, empty, val, isChecked, toggleRow, switchControl, segmented, bindSegmented, segValue, secretInput, bindReveal, copyRow, bindCopy, modelEditor, bindModelEditor, getModels, rulesEditor, bindRulesEditor, getRules, proxyInput, bindProxyTest, quotaBars, quotaWindows, watchForm, endpointRows, accessGuides, guideCard, bindSnippets} from '../ui.js';
+import {api, post, patch, del, esc, icon, fmt, date, parseModels, parseRules, on, $, $$, toast, busy, openSheet, closeSheet, sheetHead, confirmDialog, copyText} from '../core.js';
+import {pill, field, card, empty, val, isChecked, toggleRow, switchControl, segmented, bindSegmented, segValue, secretInput, bindReveal, copyRow, bindCopy, modelEditor, bindModelEditor, getModels, rulesEditor, bindRulesEditor, getRules, proxyInput, bindProxyTest, quotaBars, quotaWindows, watchForm, endpointRows, accessGuides, guideCard, bindSnippets, onActivateKey, agoLabel} from '../ui.js';
 
 const TITLES = {
   channels: ['Claude 渠道', '接入第三方 Claude 兼容 API，每个渠道一个独立地址。'],
@@ -72,7 +72,7 @@ async function channelsView(ctx) {
     $$('.item', root).forEach(el => {
       const open = () => channelSheet(ctx, Number(el.dataset.id));
       el.onclick = e => { if (!e.target.closest('[data-stop]')) open(); };
-      el.onkeydown = e => { if (e.key === 'Enter' && e.target === el) open(); };
+      onActivateKey(el, open);
     });
     bindCopy(root);
     items.forEach(c => instantSwitch(`ch-on-${c.id}`, async v => { await patch(`/api/channels/${c.id}`, {is_active: v}); c.is_active = v; render(filtered()); }, ['渠道已启用', '渠道已停用']));
@@ -85,6 +85,12 @@ async function channelsView(ctx) {
   if (hashId) { history.replaceState(null, '', ctx.path); channelSheet(ctx, hashId); }
 }
 
+// 与后端 routers/channels.py 的规则一致：只允许字母、数字、下划线、连字符，且不能占用系统路由名。
+const CHANNEL_NAME_RE = /^[A-Za-z0-9_-]+$/;
+const RESERVED_NAMES = ['gpt', 'codex', 'claudecode'];
+const channelNameError = name => !name ? '请填写渠道名称'
+  : !CHANNEL_NAME_RE.test(name) ? '只能包含字母、数字、下划线和连字符'
+  : RESERVED_NAMES.includes(name.toLowerCase()) ? `「${name}」已被系统路由占用` : '';
 const CHANNEL_DEFAULT = {name: '', base_url: '', api_key: '', auth_mode: 'both', models: '[]', cache_enabled: 1, cache_mode: 'auto', cache_ttl: '5m', cache_rules: '[]', or_routing: 0, or_providers: 'anthropic,google-vertex,amazon-bedrock', thinking_alias: 0, proxy_url: '', is_active: 1};
 
 async function channelSheet(ctx, id = null) {
@@ -99,7 +105,7 @@ async function channelSheet(ctx, id = null) {
     <div class="sheet-body" data-guard>
       ${id ? `<section class="form-section" data-no-dirty><h4>客户端地址</h4>${endpointRows(`${origin}/${c.name}`)}<p class="hint">修改渠道名称并保存后，地址会随之变化。</p></section>` : ''}
       <section class="form-section"><h4>基本信息</h4><div class="grid-2">
-        ${field('渠道名称', `<input id="c-name" value="${esc(c.name)}" placeholder="例如 openrouter" autocomplete="off" spellcheck="false">`, '客户端地址会用到它：<code id="c-endpoint"></code>')}
+        ${field('渠道名称', `<input id="c-name" value="${esc(c.name)}" placeholder="例如 openrouter" autocomplete="off" spellcheck="false">`, '<span id="c-name-hint">客户端地址会用到它：<code id="c-endpoint"></code></span>')}
         ${field('认证方式', segmented('c-auth', [['both', '双认证头'], ['x', 'x-api-key'], ['a', 'Bearer']], c.auth_mode || 'both'), '不确定时选「双认证头」。')}
         ${field('上游地址', `<input id="c-url" value="${esc(c.base_url)}" placeholder="https://example.com/v1" inputmode="url" autocomplete="off" spellcheck="false">`, '', 'span-2')}
         ${field('上游 API Key', secretInput('c-key', c.api_key, 'sk-...'), '', 'span-2')}
@@ -118,7 +124,14 @@ async function channelSheet(ctx, id = null) {
       </details>
     </div>
     <footer class="sheet-foot">${id ? `<button class="btn danger" type="button" id="c-delete">${icon('trash')}删除</button>` : '<span></span>'}<div class="row-actions"><button class="btn" type="button" data-close>取消</button><button class="btn primary" type="button" id="c-save">${id ? '保存' : '创建渠道'}</button></div></footer>`, {guard: true});
-  const endpoint = () => { $('#c-endpoint').textContent = `${origin}/${val('c-name').trim() || '渠道名'}/v1`; };
+  const endpoint = () => {
+    const name = val('c-name').trim(), error = name ? channelNameError(name) : '';
+    const hint = $('#c-name-hint');
+    $('#c-name').setAttribute('aria-invalid', String(!!error));
+    hint.className = error ? 'hint err' : '';
+    if (error) hint.textContent = error;
+    else hint.innerHTML = `客户端地址会用到它：<code>${esc(`${origin}/${name || '渠道名'}/v1`)}</code>`;
+  };
   $('#c-name').oninput = endpoint; endpoint();
   bindSegmented('c-auth'); bindSegmented('c-ttl'); bindReveal(sheet); bindCopy(sheet);
   bindSegmented('c-cache', v => { $('#c-cache-more').hidden = v === 'off'; $('#c-rules-wrap').hidden = v !== 'rules'; });
@@ -129,13 +142,11 @@ async function channelSheet(ctx, id = null) {
   $('#c-save').onclick = e => busy(e.currentTarget, async () => {
     const mode = segValue('c-cache');
     const payload = {name: val('c-name').trim(), base_url: val('c-url').trim(), api_key: val('c-key').trim(), auth_mode: segValue('c-auth'), models: JSON.stringify(getModels('c-models')), cache_enabled: mode === 'off' ? 0 : 1, cache_mode: mode === 'rules' ? 'rules' : 'auto', cache_ttl: segValue('c-ttl'), cache_rules: JSON.stringify(mode === 'rules' ? getRules('c-rules') : []), or_routing: isChecked('c-or'), or_providers: val('c-providers').trim(), thinking_alias: isChecked('c-thinking'), proxy_url: val('c-proxy').trim()};
-    if (!payload.name || !payload.base_url || !payload.api_key) throw new Error('请填写渠道名称、上游地址和 API Key');
+    const nameError = channelNameError(payload.name);
+    if (nameError) { $('#c-name').focus(); throw new Error(`渠道名称：${nameError}`); }
+    if (!payload.base_url || !payload.api_key) throw new Error('请填写上游地址和 API Key');
     if (id) await patch(`/api/channels/${id}`, payload);
-    else {
-      await post('/api/channels', payload);
-      // 创建接口不接受 is_active，需要停用时按名称找到新渠道再更新。
-      if (!isChecked('c-active')) { const made = (await api('/api/channels')).find(x => x.name === payload.name); if (made) await patch(`/api/channels/${made.id}`, {is_active: 0}); }
-    }
+    else await post('/api/channels', {...payload, is_active: isChecked('c-active')});
     closeSheet(); toast(id ? '渠道已保存' : '渠道已创建'); channelsView(ctx);
   });
   if (id) $('#c-delete').onclick = async () => {
@@ -234,9 +245,28 @@ async function subscriptionView(ctx, kind) {
     return kind === 'claudecode' ? ccVersionPanel(root, accounts, parseModels(c.models), version) : codexVersionPanel(root, accounts, version);
   }
   if (tab === 'access') return subAccessTab(ctx, kind, root);
-  root.innerHTML = `<div class="toolbar"><p class="hint">请求会在可用账号之间轮换。点击账号查看额度、修改设置或重新授权。</p><button class="btn small primary" type="button" id="sub-add">${icon('plus')}添加账号</button></div><div class="item-list" id="sub-accounts"></div>`;
+  root.innerHTML = `<div class="toolbar"><p class="hint">请求会在可用账号之间轮换。点击账号查看额度、修改设置或重新授权。</p><div class="row-actions"><button class="btn small" type="button" id="sub-refresh-all">${icon('refresh')}刷新全部用量</button><button class="btn small primary" type="button" id="sub-add">${icon('plus')}添加账号</button></div></div><div class="item-list" id="sub-accounts"></div>`;
   renderAccounts(ctx, kind, accounts);
   $('#sub-add').onclick = () => accountSheet(ctx, kind, null);
+  // 只刷新已就绪的账号，每次最多并发 3 个，单个失败不影响其余账号。
+  $('#sub-refresh-all').onclick = e => busy(e.currentTarget, async () => {
+    // 弹层里增删过账号后，页面加载时的列表已过时，先取最新列表。
+    const accounts = await refreshList(kind);
+    const targets = accounts.filter(a => accountReady(kind, a));
+    if (!targets.length) throw new Error('没有可刷新的账号，请先完成授权');
+    const failed = [];
+    const queue = [...targets];
+    const worker = async () => {
+      for (let a = queue.shift(); a; a = queue.shift()) {
+        try { const usage = await post(`/api/${kind}/accounts/${a.id}/usage`); a.usage = usage; a.usage_refreshed_at = Math.floor(Date.now() / 1000); if (usage?.plan_type) a.subscription_type = usage.plan_type; }
+        catch (_) { failed.push(a.name); }
+      }
+    };
+    await Promise.all(Array.from({length: Math.min(3, targets.length)}, worker));
+    if (ctx.alive()) renderAccounts(ctx, kind, accounts);
+    if (failed.length === targets.length) throw new Error('全部刷新失败，请检查账号状态或代理');
+    return failed.length ? `已刷新 ${targets.length - failed.length} 个，失败：${failed.join('、')}` : `已刷新 ${targets.length} 个账号的用量`;
+  });
   const hash = ctx.hash.match(/^acc-(\d+)$/);
   if (hash) { history.replaceState(null, '', ctx.path); const a = accounts.find(x => x.id === Number(hash[1])); if (a) accountSheet(ctx, kind, a); }
 }
@@ -296,7 +326,7 @@ function renderAccounts(ctx, kind, accounts) {
       <div class="item-main"><div class="item-title"><strong>${esc(a.name)}</strong>${state}</div>
         <p class="item-sub">${[a.email, a.subscription_type || (ready ? '套餐待识别' : ''), a.proxy_url ? '独立代理' : '直连'].filter(Boolean).map(esc).join(' · ')}</p>
         ${a.disable_reason ? `<p class="item-warn">${icon('alert')}${esc(a.disable_reason)}</p>` : ''}
-        ${quotaWindows(a.usage).length ? quotaBars(a.usage, {compact: true}) : ''}
+        ${quotaWindows(a.usage).length ? `${quotaBars(a.usage, {compact: true})}${a.usage_refreshed_at ? `<p class="hint">用量更新于 ${agoLabel(a.usage_refreshed_at)}</p>` : ''}` : ''}
         ${!ready ? `<button class="btn small primary" type="button" data-stop data-auth="${a.id}">${kind === 'codex' ? '去授权' : '填写 sessionKey'}${icon('arrow')}</button>` : ''}</div>
       <div class="item-side" data-stop><button class="icon-btn ghost" type="button" data-refresh="${a.id}" aria-label="刷新用量" title="刷新用量" ${ready ? '' : 'disabled'}>${icon('refresh')}</button>${switchControl(`acc-on-${a.id}`, on(a.is_active), `启用 ${a.name}`)}</div>
       <span class="item-chevron">${icon('chevron')}</span></article>`;
@@ -304,13 +334,13 @@ function renderAccounts(ctx, kind, accounts) {
   $$('.item', root).forEach(el => {
     const a = accounts.find(x => x.id === Number(el.dataset.id));
     el.onclick = e => { if (!e.target.closest('[data-stop]')) accountSheet(ctx, kind, a); };
-    el.onkeydown = e => { if (e.key === 'Enter' && e.target === el) accountSheet(ctx, kind, a); };
+    onActivateKey(el, () => accountSheet(ctx, kind, a));
   });
   $$('[data-auth]', root).forEach(b => b.onclick = () => accountSheet(ctx, kind, accounts.find(x => x.id === Number(b.dataset.auth)), {focusAuth: true}));
   $$('[data-refresh]', root).forEach(b => b.onclick = () => busy(b, async () => {
     const id = Number(b.dataset.refresh);
     const usage = await post(`/api/${kind}/accounts/${id}/usage`);
-    const a = accounts.find(x => x.id === id); a.usage = usage;
+    const a = accounts.find(x => x.id === id); a.usage = usage; a.usage_refreshed_at = Math.floor(Date.now() / 1000);
     if (usage?.plan_type) a.subscription_type = usage.plan_type;
     renderAccounts(ctx, kind, accounts);
     return '用量已刷新';
@@ -343,7 +373,7 @@ async function accountSheet(ctx, kind, account, {focusAuth = false, justCreated 
         <div id="sa-device" hidden><p class="hint">适合无法粘贴回调地址的情况：打开验证页面，输入显示的代码即可，这里会自动完成。</p><button class="btn primary" type="button" id="sa-auth-device">${icon('key')}获取设备代码</button></div>
         <div class="auth-state" id="sa-auth-state"></div></section>`;
   const usagePane = !id ? '' : `<section class="form-section"><div class="account-meta">${ready ? pill('ok', kind === 'codex' ? '已授权' : '凭据已录入') : pill('warn', kind === 'codex' ? '未授权' : '未录入凭据')}${account.subscription_type ? `<span class="meta-item">${esc(account.subscription_type)}</span>` : ''}${account.email ? `<span class="meta-item">${esc(account.email)}</span>` : ''}</div>
-        <div id="sa-usage">${quotaBars(account.usage)}</div>${account.usage_refreshed_at ? `<p class="hint">更新于 ${date(account.usage_refreshed_at)}</p>` : ''}
+        <div id="sa-usage">${quotaBars(account.usage)}</div>${account.usage_refreshed_at ? `<p class="hint">更新于 ${date(account.usage_refreshed_at)}（${agoLabel(account.usage_refreshed_at)}）</p>` : ''}
         <div class="row-actions"><button class="btn small" type="button" id="sa-refresh" ${ready ? '' : 'disabled'}>${icon('refresh')}刷新用量</button>${kind === 'codex' ? `<button class="btn small" type="button" id="sa-models" ${ready ? '' : 'disabled'}>${icon('download')}拉取可用模型</button>` : ''}<span class="hint" id="sa-usage-state"></span></div>
         ${kind === 'codex' ? `<div id="sa-model-list">${modelChips(account.models)}</div>` : ''}</section>
       ${kind === 'codex' ? `<section class="form-section"><h4>重置卡</h4><div id="sa-reset-credits"><p class="hint">${ready ? '尚未查询' : '授权后可查询'}</p></div>
@@ -508,7 +538,7 @@ async function accountSheet(ctx, kind, account, {focusAuth = false, justCreated 
     stopPoll?.();
     const d = await post(`/api/codex/accounts/${id}/device/start`);
     setStatus(`<ol class="mini-steps"><li>打开 <a href="${esc(d.verification_url)}" target="_blank" rel="noopener">${esc(d.verification_url)}</a></li><li>输入代码 <button class="code-chip" type="button" data-copy="${esc(d.user_code)}">${esc(d.user_code)}${icon('copy')}</button></li><li>完成后这里会自动更新，请不要关闭本页。</li></ol><p class="hint"><span class="spinner"></span>等待授权中…</p>`);
-    $$('[data-copy]', status).forEach(b => b.onclick = () => navigator.clipboard?.writeText(b.dataset.copy).then(() => toast('代码已复制')));
+    $$('[data-copy]', status).forEach(b => b.onclick = () => copyText(b.dataset.copy, '代码已复制'));
     let alive = true; let timer = null;
     stopPoll = () => { alive = false; clearTimeout(timer); };
     const interval = Math.max(1000, Number(d.interval || 5) * 1000);

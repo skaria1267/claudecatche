@@ -36,6 +36,7 @@ class ChannelCreate(BaseModel):
     or_providers: str = "anthropic,google-vertex,amazon-bedrock"
     thinking_alias: int = 0
     proxy_url: str = ""
+    is_active: int = 1
 
 
 class ChannelUpdate(BaseModel):

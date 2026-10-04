@@ -18,11 +18,20 @@ function accountIssues(kind, accounts, label) {
   return out;
 }
 
+// 近 7 天每日请求数的迷你柱状图，最后一根是今天。
+function spark(values, days) {
+  if (!values?.length) return '';
+  const max = Math.max(1, ...values);
+  const label = (day, n) => { const [, m, d] = String(day || '').split('-'); return `${Number(m)}/${Number(d)} ${n} 次`; };
+  return `<div class="spark" role="img" aria-label="近 7 天请求：${values.join('、')}">${values.map((v, i) => `<i class="${v ? '' : 'zero'}" style="height:${v ? Math.max(8, v / max * 100) : 0}%" title="${esc(label(days?.[i], v))}"></i>`).join('')}<span>近 7 天</span></div>`;
+}
+
 export async function overviewPage(ctx) {
-  const [channels, usage, oai, oaiUsage, cx, cxAccounts, cc, ccAccounts, ccUsage, access, fails, cxFails, ccFails] = await settle([
-    api('/api/channels'), api('/api/usage'), api('/api/openai/config'), api('/api/openai/usage'),
+  // 今日数字、7 天趋势和失败数量由 /api/overview 一次返回。
+  const [channels, oai, cx, cxAccounts, cc, ccAccounts, access, stats] = await settle([
+    api('/api/channels'), api('/api/openai/config'),
     api('/api/codex/config'), api('/api/codex/accounts'), api('/api/claudecode/config'), api('/api/claudecode/accounts'),
-    api('/api/claudecode/usage-summary'), api('/api/settings/access_key'), api('/api/failures'), api('/api/codex/failures'), api('/api/claudecode/failures'),
+    api('/api/settings/access_key'), api(`/api/overview?tz_offset=${-new Date().getTimezoneOffset() * 60}`),
   ]);
   if (!ctx.alive()) return;
   if (!channels) throw new Error('无法读取路由数据');
@@ -32,12 +41,14 @@ export async function overviewPage(ctx) {
   const ccReady = (ccAccounts || []).filter(a => a.credential_configured && on(a.is_active)).length;
   const subState = (cfg, accounts, ready) => !accounts?.length ? ['idle', '未配置'] : !on(cfg?.enabled) ? ['idle', '未启用'] : ready ? ['ok', '运行中'] : ['warn', '无可用账号'];
 
+  const today = key => { const r = stats?.routes?.[key]; return r ? [['今日请求', fmt(r.today_requests)], ['今日 Token', fmt(r.today_tokens)]] : []; };
+  const trend = key => stats?.routes?.[key]?.trend || null;
   const routes = [
     {
       href: '/page/channels', icon: 'layers', name: 'Claude 渠道',
       desc: '接入第三方 Claude 兼容 API（如 OpenRouter、各类中转），每个渠道有独立地址。',
       state: !channels.length ? ['idle', '未配置'] : activeChannels ? ['ok', '运行中'] : ['idle', '全部停用'],
-      stats: [['渠道', `${activeChannels} / ${channels.length}`], ['累计请求', fmt(usage?.total_requests)]],
+      stats: [['渠道', `${activeChannels} / ${channels.length}`], ...today('claude')], trend: trend('claude'),
       first: '第一步：新建一个渠道，填上游地址和 Key',
       empty: !channels.length,
     },
@@ -45,7 +56,7 @@ export async function overviewPage(ctx) {
       href: '/page/openai', icon: 'sparkle', name: 'OpenAI',
       desc: '转发到 OpenAI 官方 API。客户端用中转站的密钥，真实 Key 不外露。',
       state: !oai?.api_key_configured ? ['idle', '未配置'] : on(oai.is_active) ? ['ok', '运行中'] : ['idle', '未启用'],
-      stats: [['模型', String(parseModels(oai?.models).length)], ['累计请求', fmt(oaiUsage?.total_requests)]],
+      stats: [['模型', String(parseModels(oai?.models).length)], ...today('openai')], trend: trend('openai'),
       first: '第一步：填入官方 API Key 并启用',
       empty: !oai?.api_key_configured,
     },
@@ -53,7 +64,7 @@ export async function overviewPage(ctx) {
       href: '/page/codex', icon: 'terminal', name: 'Codex',
       desc: '把 ChatGPT 订阅账号变成 API，支持多账号轮换与每账号代理。',
       state: subState(cx, cxAccounts, cxReady),
-      stats: [['可用账号', `${cxReady} / ${(cxAccounts || []).length}`], ['模型', String(parseModels(cx?.models).length)]],
+      stats: [['可用账号', `${cxReady} / ${(cxAccounts || []).length}`], ...today('codex')], trend: trend('codex'),
       first: '第一步：添加账号并用 OpenAI 登录授权',
       empty: !(cxAccounts || []).length,
     },
@@ -61,7 +72,7 @@ export async function overviewPage(ctx) {
       href: '/page/claudecode', icon: 'bolt', name: 'Claude Code',
       desc: '把 Claude 订阅账号变成 API，支持多账号、限速和客户端版本管理。',
       state: subState(cc, ccAccounts, ccReady),
-      stats: [['可用账号', `${ccReady} / ${(ccAccounts || []).length}`], ['累计请求', fmt(ccUsage?.total_requests)]],
+      stats: [['可用账号', `${ccReady} / ${(ccAccounts || []).length}`], ...today('claudecode')], trend: trend('claudecode'),
       first: '第一步：添加账号并录入 sessionKey',
       empty: !(ccAccounts || []).length,
     },
@@ -74,7 +85,7 @@ export async function overviewPage(ctx) {
   ];
   if (on(cx?.enabled) && !cxReady && (cxAccounts || []).length) issues.push({tone: 'danger', text: 'Codex 已启用，但没有可用账号', href: '/page/codex'});
   if (on(cc?.enabled) && !ccReady && (ccAccounts || []).length) issues.push({tone: 'danger', text: 'Claude Code 已启用，但没有可用账号', href: '/page/claudecode'});
-  const failTotal = (fails?.length || 0) + (cxFails?.length || 0) + (ccFails?.length || 0);
+  const failTotal = Object.values(stats?.failures || {}).reduce((sum, n) => sum + (n || 0), 0);
   if (failTotal) issues.push({tone: 'warn', text: `最近有 ${failTotal} 条失败请求`, href: '/page/logs?view=failures'});
 
   const origin = location.origin;
@@ -94,7 +105,7 @@ export async function overviewPage(ctx) {
     <div class="route-grid overview-routes">${routes.map(r => `<a class="route-card" href="${r.href}">
       <div class="route-top"><span class="route-ico">${icon(r.icon)}</span>${pill(r.state[0], r.state[1])}</div>
       <h3>${r.name}</h3><p>${r.desc}</p>
-      ${r.empty ? `<div class="route-first">${icon('info')}<span>${r.first}</span></div>` : `<dl class="route-stats">${r.stats.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>`}
+      ${r.empty ? `<div class="route-first">${icon('info')}<span>${r.first}</span></div>` : `<dl class="route-stats">${r.stats.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>${spark(r.trend, stats?.days)}`}
       <span class="route-cta">${r.empty ? '开始配置' : '管理'}${icon('arrow')}</span></a>`).join('')}</div>
 
     ${issues.length ? `<section class="card attention"><header class="card-head"><div class="card-title"><span class="card-ico warn">${icon('alert')}</span><div><h3>需要注意</h3><p>${issues.length} 项待处理，点击直接前往</p></div></div></header><div class="issue-list">${issues.map(i => `<a class="issue ${i.tone}" href="${i.href}"><i></i><span>${esc(i.text)}</span>${icon('chevron')}</a>`).join('')}</div></section>` : `<section class="card all-good"><span class="card-ico ok">${icon('check')}</span><div><strong>一切正常</strong><p>没有需要处理的账号或失败请求。</p></div></section>`}

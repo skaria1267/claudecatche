@@ -295,6 +295,7 @@ details.advanced>*:not(summary){margin-top:14px}
 .quota-row{display:flex;flex-direction:column;gap:5px}
 .quota-label{display:flex;justify-content:space-between;font-size:12.5px;color:var(--text-2)}
 .quota-num{font-weight:700;font-variant-numeric:tabular-nums}
+.quota-reset{color:var(--text-3);font-size:11.5px}
 .quota-num.ok{color:var(--text)}.quota-num.warn{color:var(--warn)}.quota-num.danger{color:var(--danger)}
 .bar{height:7px;border-radius:999px;background:var(--surface-3);overflow:hidden}
 .bar i{display:block;height:100%;border-radius:inherit;background:var(--accent);transition:width .4s}
@@ -337,6 +338,20 @@ details.advanced>*:not(summary){margin-top:14px}
 .search{display:flex;align-items:center;gap:8px;flex:1;max-width:420px;padding:0 12px;border-radius:var(--r);border:1px solid var(--border-strong);background:var(--surface);color:var(--text-3)}
 .search:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .search input{border:0!important;box-shadow:none!important;padding:0!important;background:transparent!important}
+.search.search-sm{flex:0 1 200px;min-width:140px;padding:0 10px}
+.search.search-sm input{min-height:34px;font-size:13px}
+.search.search-sm .ico{width:16px;height:16px}
+input[aria-invalid="true"]{border-color:var(--danger)}
+input[aria-invalid="true"]:focus{box-shadow:0 0 0 3px var(--danger-soft)}
+
+/* 每日趋势 */
+.chart-readout{min-height:20px;color:var(--text-2);font-size:13px;font-variant-numeric:tabular-nums}
+.chart{display:flex;align-items:flex-end;gap:2px;height:160px}
+.chart-col{flex:1;min-width:0;height:100%;display:flex;align-items:flex-end;cursor:pointer}
+.chart-col i{display:block;width:100%;background:var(--accent);opacity:.75;border-radius:3px 3px 0 0;transition:opacity .12s}
+.chart-col:hover i,.chart-col.active i{opacity:1}
+.chart-col.zero{background:linear-gradient(to top,var(--border) 1px,transparent 1px)}
+.chart-axis{display:flex;justify-content:space-between;margin-top:6px;color:var(--text-3);font-size:11.5px;font-variant-numeric:tabular-nums}
 
 .empty{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:40px 20px;background:var(--surface);border:1px dashed var(--border-strong);border-radius:var(--r-lg)}
 .empty-ico{display:grid;place-items:center;width:46px;height:46px;border-radius:14px;background:var(--accent-soft);color:var(--accent-text);margin-bottom:4px}
@@ -415,6 +430,11 @@ details.advanced>*:not(summary){margin-top:14px}
 .route-stats{display:flex;gap:24px;margin:4px 0 0}
 .route-stats dt{color:var(--text-3);font-size:12px}
 .route-stats dd{margin:0;font-weight:700;font-size:17px;font-variant-numeric:tabular-nums}
+.spark{display:flex;align-items:flex-end;gap:3px;height:30px;margin-top:2px}
+.spark i{flex:1;max-width:14px;background:var(--accent);opacity:.55;border-radius:2px 2px 0 0}
+.spark i:last-of-type{opacity:1}
+.spark i.zero{height:1px!important;background:var(--border-strong)}
+.spark span{margin-left:6px;align-self:center;color:var(--text-3);font-size:11.5px;white-space:nowrap}
 .route-first{display:flex;gap:8px;align-items:center;padding:9px 11px;border-radius:var(--r);background:var(--surface-2);color:var(--text-2);font-size:12.5px}
 .route-first .ico{color:var(--accent-text);width:16px;height:16px}
 .route-cta{display:inline-flex;align-items:center;gap:6px;margin-top:4px;color:var(--accent-text);font-weight:600;font-size:13px}
@@ -464,6 +484,7 @@ details.advanced>*:not(summary){margin-top:14px}
 .sheet{position:fixed;z-index:41;top:0;right:0;bottom:0;width:min(560px,100vw);background:var(--surface);border-left:1px solid var(--border);box-shadow:var(--shadow-lg);display:flex;flex-direction:column;overflow:hidden;transform:translateX(104%);transition:transform .26s cubic-bezier(.2,.8,.2,1);visibility:hidden}
 .sheet.wide{width:min(760px,100vw)}
 .sheet.open{transform:none;visibility:visible}
+.sheet:focus{outline:none}
 .sheet-grip{display:none}
 .sheet-head{display:flex;flex:none;justify-content:space-between;align-items:flex-start;gap:12px;padding:20px 22px 14px;border-bottom:1px solid var(--border)}
 .sheet-head h2{font-size:19px;font-weight:700;margin-top:2px;word-break:break-all}

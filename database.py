@@ -141,6 +141,14 @@ async def init_db():
             );
         """)
 
+        # 日志按时间倒序分页、按天统计都依赖 request_at。
+        await db.executescript("""
+            CREATE INDEX IF NOT EXISTS idx_requests_at ON requests(request_at);
+            CREATE INDEX IF NOT EXISTS idx_openai_requests_at ON openai_requests(request_at);
+            CREATE INDEX IF NOT EXISTS idx_claudecode_requests_at ON claudecode_requests(request_at);
+            CREATE INDEX IF NOT EXISTS idx_codex_requests_at ON codex_requests(request_at);
+        """)
+
         await db.execute("""
             INSERT OR IGNORE INTO openai_config (
                 id, base_url, api_key, models, is_active, proxy_url,

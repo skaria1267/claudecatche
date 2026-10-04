@@ -1,6 +1,6 @@
 import aiosqlite
 from database import get_db
-from services.usage_filters import usage_where
+from services.usage_filters import usage_where, log_filters
 
 # ========== 渠道 ==========
 
@@ -16,17 +16,17 @@ async def add_channel(name: str, base_url: str, api_key: str, auth_mode: str = "
                       cache_ttl: str = "5m", cache_rules: str = "[]",
                       or_routing: int = 0,
                       or_providers: str = "anthropic,google-vertex,amazon-bedrock",
-                      thinking_alias: int = 0, proxy_url: str = ""):
+                      thinking_alias: int = 0, proxy_url: str = "", is_active: int = 1):
     async with get_db() as db:
         await db.execute(
             """INSERT INTO channels
                (name, base_url, api_key, auth_mode, models,
                 cache_enabled, cache_mode, cache_ttl, cache_rules,
-                or_routing, or_providers, thinking_alias, proxy_url)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                or_routing, or_providers, thinking_alias, proxy_url, is_active)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (name, base_url, api_key, auth_mode, models,
              cache_enabled, cache_mode, cache_ttl, cache_rules,
-             or_routing, or_providers, thinking_alias, proxy_url)
+             or_routing, or_providers, thinking_alias, proxy_url, 1 if is_active else 0)
         )
         await db.commit()
 
@@ -111,7 +111,8 @@ async def get_requests(channel_id: int = None, limit: int = 50, offset: int = 0)
 
 
 async def get_request_logs(channel_id: int = None, source: str = "all",
-                           limit: int = 50, offset: int = 0):
+                           limit: int = 50, offset: int = 0, status: str = None,
+                           q: str = None, start_at: int = None, end_at: int = None):
     """Return Claude and OpenAI requests with one UI-facing schema."""
     source = source if source in ("all", "claude", "openai") else "all"
     claude_sql = """
@@ -142,8 +143,11 @@ async def get_request_logs(channel_id: int = None, source: str = "all",
         query = openai_sql
     else:
         query = f"{claude_sql} UNION ALL {openai_sql}"
-    query = f"SELECT * FROM ({query}) ORDER BY request_at DESC LIMIT ? OFFSET ?"
-    params.extend((limit, offset))
+    clauses, filter_params = log_filters(status, q, start_at, end_at)
+    where = " WHERE " + " AND ".join(clauses) if clauses else ""
+    query = f"SELECT * FROM ({query}){where} ORDER BY request_at DESC LIMIT ? OFFSET ?"
+    params.extend(filter_params)
+    params.extend((min(max(limit, 1), 500), max(offset, 0)))
 
     async with get_db() as db:
         db.row_factory = aiosqlite.Row

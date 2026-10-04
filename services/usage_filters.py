@@ -8,6 +8,30 @@ def usage_period(start_at: int | None = Query(None, ge=0),
     return {"start_at": start_at, "end_at": end_at}
 
 
+def log_filters(status: str | None = None, q: str | None = None,
+                start_at: int | None = None, end_at: int | None = None, *,
+                model_columns: tuple[str, ...] = ("model",), prefix: str = "") -> tuple[list, list]:
+    """日志列表的状态 / 模型关键词 / 时间筛选，返回 (条件列表, 参数)。成功的判定与前端一致：0 < status < 400。"""
+    clauses, params = [], []
+    ok = f"({prefix}status > 0 AND {prefix}status < 400)"
+    if status == "ok":
+        clauses.append(ok)
+    elif status == "bad":
+        clauses.append(f"({prefix}status IS NULL OR NOT {ok})")
+    keyword = (q or "").strip()
+    if keyword:
+        escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        clauses.append("(" + " OR ".join(f"{prefix}{c} LIKE ? ESCAPE '\\'" for c in model_columns) + ")")
+        params.extend([f"%{escaped}%"] * len(model_columns))
+    if start_at is not None:
+        clauses.append(f"{prefix}request_at >= ?")
+        params.append(start_at)
+    if end_at is not None:
+        clauses.append(f"{prefix}request_at <= ?")
+        params.append(end_at)
+    return clauses, params
+
+
 def usage_where(start_at: int | None = None, end_at: int | None = None, *,
                 channel_id: int | None = None, account_id: int | None = None,
                 alias: str = "") -> tuple[str, list]:

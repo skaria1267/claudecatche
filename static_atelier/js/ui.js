@@ -14,16 +14,32 @@ export const metric = (label, value, note = '', raw = false) => `<div class="met
 export const val = id => document.getElementById(id)?.value ?? '';
 export const isChecked = id => document.getElementById(id)?.checked ? 1 : 0;
 
-export function segmented(id, options, value, {small = false} = {}) {
-  return `<div class="segmented ${small ? 'small' : ''}" id="${id}" role="tablist" data-value="${esc(value)}">${options.map(([v, label]) => `<button type="button" role="tab" data-value="${esc(v)}" class="${v === value ? 'active' : ''}" aria-selected="${v === value}">${esc(label)}</button>`).join('')}</div>`;
+// 单选分段按钮：radiogroup 语义，Tab 只停在选中项，方向键 / Home / End 切换。
+export function segmented(id, options, value, {small = false, label = ''} = {}) {
+  const current = options.some(([v]) => v === value) ? value : options[0]?.[0];
+  return `<div class="segmented ${small ? 'small' : ''}" id="${id}" role="radiogroup"${label ? ` aria-label="${esc(label)}"` : ''} data-value="${esc(value)}">${options.map(([v, text]) => `<button type="button" role="radio" data-value="${esc(v)}" class="${v === value ? 'active' : ''}" aria-checked="${v === value}" tabindex="${v === current ? 0 : -1}">${esc(text)}</button>`).join('')}</div>`;
 }
 export function bindSegmented(id, onChange) {
   const root = document.getElementById(id);
-  $$('button', root).forEach(btn => btn.onclick = () => {
+  const buttons = $$('button', root);
+  buttons.forEach(btn => btn.onclick = () => {
     root.dataset.value = btn.dataset.value;
-    $$('button', root).forEach(b => { b.classList.toggle('active', b === btn); b.setAttribute('aria-selected', String(b === btn)); });
+    buttons.forEach(b => { const on = b === btn; b.classList.toggle('active', on); b.setAttribute('aria-checked', String(on)); b.tabIndex = on ? 0 : -1; });
     onChange?.(btn.dataset.value);
   });
+  root.onkeydown = e => {
+    const i = buttons.indexOf(document.activeElement);
+    if (i < 0) return;
+    const next = {ArrowRight: i + 1, ArrowDown: i + 1, ArrowLeft: i - 1, ArrowUp: i - 1, Home: 0, End: buttons.length - 1}[e.key];
+    if (next === undefined) return;
+    e.preventDefault();
+    const target = buttons[(next + buttons.length) % buttons.length];
+    target.focus(); target.click();
+  };
+}
+// 可点击的整行（列表项、表格行）：Enter 和空格都能打开，焦点在行内按钮上时不触发。
+export function onActivateKey(el, open) {
+  el.onkeydown = e => { if (e.target === el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); open(); } };
 }
 export const segValue = id => document.getElementById(id)?.dataset.value ?? '';
 
@@ -172,9 +188,13 @@ export function quotaWindows(usage) {
   if (!windows.length && usage && typeof usage === 'object') for (const [key, value] of Object.entries(usage)) if (value && typeof value === 'object' && ('utilization' in value || 'used_percent' in value)) push(usageLabels[key] || key, value);
   return windows;
 }
-const resetText = reset => {
-  if (!reset) return '';
+const resetStamp = reset => {
+  if (!reset) return 0;
   const ts = typeof reset === 'number' ? reset : Date.parse(reset) / 1000;
+  return Number.isFinite(ts) ? ts : 0;
+};
+const resetText = reset => {
+  const ts = resetStamp(reset);
   if (!ts) return '';
   const left = ts - Date.now() / 1000;
   if (left <= 0) return '已重置';
@@ -182,6 +202,21 @@ const resetText = reset => {
   if (left < 86400) return `${Math.round(left / 3600)} 小时后重置`;
   return `${Math.round(left / 86400)} 天后重置`;
 };
+export const agoText = ts => {
+  const passed = Date.now() / 1000 - Number(ts || 0);
+  if (!ts || passed < 0) return '';
+  if (passed < 60) return '刚刚';
+  if (passed < 3600) return `${Math.floor(passed / 60)} 分钟前`;
+  if (passed < 86400) return `${Math.floor(passed / 3600)} 小时前`;
+  return `${Math.floor(passed / 86400)} 天前`;
+};
+// 相对时间元素：渲染时写一次，之后每分钟刷新，页面放久了也不会过时。
+export const resetLabel = reset => { const ts = resetStamp(reset); return ts ? `<span data-reset-at="${ts}">${esc(resetText(ts))}</span>` : ''; };
+export const agoLabel = ts => ts ? `<span data-ago="${Number(ts)}">${esc(agoText(ts))}</span>` : '';
+setInterval(() => {
+  $$('[data-reset-at]').forEach(el => { el.textContent = resetText(Number(el.dataset.resetAt)); });
+  $$('[data-ago]').forEach(el => { el.textContent = agoText(Number(el.dataset.ago)); });
+}, 60000);
 export const quotaTone = pct => pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : 'ok';
 export function quotaBars(usage, {compact = false} = {}) {
   const windows = quotaWindows(usage);
@@ -190,7 +225,8 @@ export function quotaBars(usage, {compact = false} = {}) {
   if (credits) extra.push(`<span class="meta-item">Credits ${credits.unlimited ? '无限' : esc(credits.balance ?? (credits.has_credits ? '可用' : '—'))}</span>`);
   if (usage?.rate_limit_reset_credits?.available_count != null) extra.push(`<span class="meta-item">窗口重置券 ${fmt(usage.rate_limit_reset_credits.available_count)}</span>`);
   if (!windows.length) return `<p class="hint">${compact ? '尚未获取额度' : '还没有额度数据，点击「刷新用量」获取。'}</p>${extra.length ? `<div class="meta-line">${extra.join('')}</div>` : ''}`;
-  return `<div class="quota ${compact ? 'compact' : ''}">${windows.map(w => { const pct = Math.max(0, Math.min(100, w.pct)); return `<div class="quota-row"><div class="quota-label"><span>${esc(w.name)}</span><span class="quota-num ${quotaTone(pct)}">${pct.toFixed(compact ? 0 : 1)}%</span></div><div class="bar"><i class="${quotaTone(pct)}" style="width:${pct}%"></i></div>${compact ? '' : `<small class="hint">${esc(resetText(w.reset) || (w.reset ? '重置于 ' + date(w.reset) : ''))}</small>`}</div>`; }).join('')}</div>${extra.length ? `<div class="meta-line">${extra.join('')}</div>` : ''}`;
+  // 精简模式把重置时间放在窗口名后面，账号列表里也能看到什么时候恢复。
+  return `<div class="quota ${compact ? 'compact' : ''}">${windows.map(w => { const pct = Math.max(0, Math.min(100, w.pct)); const reset = resetLabel(w.reset); return `<div class="quota-row"><div class="quota-label"><span>${esc(w.name)}${compact && reset ? `<small class="quota-reset"> · ${reset}</small>` : ''}</span><span class="quota-num ${quotaTone(pct)}">${pct.toFixed(compact ? 0 : 1)}%</span></div><div class="bar"><i class="${quotaTone(pct)}" style="width:${pct}%"></i></div>${compact ? '' : `<small class="hint">${reset || (w.reset ? esc('重置于 ' + date(w.reset)) : '')}</small>`}</div>`; }).join('')}</div>${extra.length ? `<div class="meta-line">${extra.join('')}</div>` : ''}`;
 }
 
 // 未保存修改提示栏：对比表单快照，有差异时出现在底部。

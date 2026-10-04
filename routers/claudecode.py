@@ -277,9 +277,10 @@ async def refresh_usage(account_id: int, authorization: str = Header(None)):
 
 @router.get("/api/claudecode/logs")
 async def request_logs(account_id: int = None, limit: int = 100, offset: int = 0,
-                       authorization: str = Header(None)):
+                       status: str = None, q: str = None, authorization: str = Header(None),
+                       period: dict = Depends(usage_period)):
     await _admin(authorization)
-    return await claudecode_store.list_requests(account_id, limit, offset)
+    return await claudecode_store.list_requests(account_id, limit, offset, status=status, q=q, **period)
 
 
 @router.get("/api/claudecode/usage-summary")

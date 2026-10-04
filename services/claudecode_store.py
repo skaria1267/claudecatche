@@ -4,7 +4,7 @@ import time
 import aiosqlite
 
 from database import get_db
-from services.usage_filters import usage_where
+from services.usage_filters import usage_where, log_filters
 from services.secret_store import open_secret, seal
 
 
@@ -140,14 +140,17 @@ async def add_request(account_id: int, model: str, effort: str, usage: dict,
 
 
 async def list_requests(account_id: int | None = None, limit: int = 100,
-                        offset: int = 0) -> list[dict]:
+                        offset: int = 0, status: str | None = None, q: str | None = None,
+                        start_at: int | None = None, end_at: int | None = None) -> list[dict]:
     query = """SELECT r.*, a.name AS account_name
                FROM claudecode_requests r
                LEFT JOIN claudecode_accounts a ON a.id = r.account_id"""
-    params: list = []
+    clauses, params = log_filters(status, q, start_at, end_at, prefix="r.")
     if account_id:
-        query += " WHERE r.account_id = ?"
-        params.append(account_id)
+        clauses.insert(0, "r.account_id = ?")
+        params.insert(0, account_id)
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
     query += " ORDER BY r.request_at DESC LIMIT ? OFFSET ?"
     params.extend([min(max(limit, 1), 500), max(offset, 0)])
     async with get_db() as db:
