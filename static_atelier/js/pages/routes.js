@@ -49,6 +49,7 @@ export async function routesPage(ctx, kind) {
 
 const CACHE_LABELS = {off: '关闭', auto: '自动', rules: '手动断点', explicit: '手动断点', implicit: '自动（OpenAI 隐式）', client: '跟随客户端'};
 const cacheOptions = keys => keys.map(k => [k, CACHE_LABELS[k]]);
+const channelCacheMode = c => on(c.cache_enabled) ? (['auto', 'rules', 'client'].includes(c.cache_mode) ? c.cache_mode : 'auto') : 'off';
 
 async function channelsView(ctx) {
   const list = await api('/api/channels');
@@ -66,7 +67,7 @@ async function channelsView(ctx) {
     root.innerHTML = items.length ? items.map(c => `<article class="item" data-id="${c.id}" tabindex="0">
       <div class="item-main"><div class="item-title"><strong>${esc(c.name)}</strong>${on(c.is_active) ? pill('ok', '启用') : pill('idle', '停用')}</div>
         <p class="item-sub mono">${esc(c.base_url)}</p>
-        <div class="meta-line"><span class="meta-item">${parseModels(c.models).length} 个模型</span><span class="meta-item">缓存 ${on(c.cache_enabled) ? CACHE_LABELS[c.cache_mode === 'rules' ? 'rules' : 'auto'] : '关闭'}</span><span class="meta-item">${c.proxy_url ? '走代理' : '直连'}</span>${on(c.thinking_alias) ? '<span class="meta-item">思考后缀</span>' : ''}${on(c.or_routing) ? '<span class="meta-item">供应商路由</span>' : ''}</div></div>
+        <div class="meta-line"><span class="meta-item">${parseModels(c.models).length} 个模型</span><span class="meta-item">缓存 ${CACHE_LABELS[channelCacheMode(c)]}</span><span class="meta-item">${c.proxy_url ? '走代理' : '直连'}</span>${on(c.thinking_alias) ? '<span class="meta-item">思考后缀</span>' : ''}${on(c.or_routing) ? '<span class="meta-item">供应商路由</span>' : ''}</div></div>
       <div class="item-side" data-stop><button class="icon-btn ghost" type="button" data-copy="${esc(`${origin}/${c.name}/v1`)}" aria-label="复制 ${esc(c.name)} 的客户端地址" title="复制客户端地址">${icon('copy')}</button>${switchControl(`ch-on-${c.id}`, on(c.is_active), `启用 ${c.name}`)}</div>
       <span class="item-chevron">${icon('chevron')}</span></article>`).join('') : empty('search', '没有匹配的渠道', '换一个关键词试试。');
     $$('.item', root).forEach(el => {
@@ -95,7 +96,7 @@ const CHANNEL_DEFAULT = {name: '', base_url: '', api_key: '', auth_mode: 'both',
 
 async function channelSheet(ctx, id = null) {
   const c = id ? await api(`/api/channels/${id}`) : {...CHANNEL_DEFAULT};
-  const cacheMode = on(c.cache_enabled) ? (c.cache_mode === 'rules' ? 'rules' : 'auto') : 'off';
+  const cacheMode = channelCacheMode(c);
   const origin = location.origin;
   // 新建时「启用」随表单保存；编辑时与列表一致，开关立即生效。
   const activeRow = id
@@ -113,8 +114,8 @@ async function channelSheet(ctx, id = null) {
       <section class="form-section"><h4>模型</h4>${modelEditor('c-models', parseModels(c.models), {fetchLabel: '从上游拉取'})}</section>
       <section class="form-section"><h4>网络</h4>${proxyInput('c-proxy', c.proxy_url)}</section>
       <section class="form-section"><h4>提示词缓存</h4>
-        ${field('缓存方式', segmented('c-cache', cacheOptions(['off', 'auto', 'rules']), cacheMode), '自动：由中转站在合适位置打缓存标记，适合大多数情况。')}
-        <div id="c-cache-more" ${cacheMode === 'off' ? 'hidden' : ''}>${field('缓存时长', segmented('c-ttl', [['5m', '5 分钟'], ['1h', '1 小时']], c.cache_ttl || '5m', {small: true}))}
+        ${field('缓存方式', segmented('c-cache', cacheOptions(['off', 'auto', 'rules', 'client']), cacheMode), '自动：由中转站在合适位置打缓存标记，适合大多数情况。')}
+        <div id="c-cache-more" ${['off', 'client'].includes(cacheMode) ? 'hidden' : ''}>${field('缓存时长', segmented('c-ttl', [['5m', '5 分钟'], ['1h', '1 小时']], c.cache_ttl || '5m', {small: true}))}
         <div id="c-rules-wrap" ${cacheMode === 'rules' ? '' : 'hidden'}>${rulesEditor('c-rules', parseRules(c.cache_rules), true)}</div></div>
       </section>
       <details class="form-section advanced" ${on(c.or_routing) || on(c.thinking_alias) ? 'open' : ''}><summary><h4>高级选项</h4>${icon('chevron')}</summary>
@@ -134,14 +135,14 @@ async function channelSheet(ctx, id = null) {
   };
   $('#c-name').oninput = endpoint; endpoint();
   bindSegmented('c-auth'); bindSegmented('c-ttl'); bindReveal(sheet); bindCopy(sheet);
-  bindSegmented('c-cache', v => { $('#c-cache-more').hidden = v === 'off'; $('#c-rules-wrap').hidden = v !== 'rules'; });
+  bindSegmented('c-cache', v => { $('#c-cache-more').hidden = ['off', 'client'].includes(v); $('#c-rules-wrap').hidden = v !== 'rules'; });
   bindRulesEditor('c-rules');
   bindModelEditor('c-models', {onFetch: async () => (await post('/api/channels/fetch-models', {base_url: val('c-url').trim(), api_key: val('c-key').trim(), auth_mode: segValue('c-auth'), proxy_url: val('c-proxy').trim()})).models});
   bindProxyTest('c-proxy', () => val('c-url').trim());
   if (id) instantSwitch('c-active', async v => { await patch(`/api/channels/${id}`, {is_active: v}); c.is_active = v; refreshChannels(ctx); }, ['渠道已启用', '渠道已停用']);
   $('#c-save').onclick = e => busy(e.currentTarget, async () => {
     const mode = segValue('c-cache');
-    const payload = {name: val('c-name').trim(), base_url: val('c-url').trim(), api_key: val('c-key').trim(), auth_mode: segValue('c-auth'), models: JSON.stringify(getModels('c-models')), cache_enabled: mode === 'off' ? 0 : 1, cache_mode: mode === 'rules' ? 'rules' : 'auto', cache_ttl: segValue('c-ttl'), cache_rules: JSON.stringify(mode === 'rules' ? getRules('c-rules') : []), or_routing: isChecked('c-or'), or_providers: val('c-providers').trim(), thinking_alias: isChecked('c-thinking'), proxy_url: val('c-proxy').trim()};
+    const payload = {name: val('c-name').trim(), base_url: val('c-url').trim(), api_key: val('c-key').trim(), auth_mode: segValue('c-auth'), models: JSON.stringify(getModels('c-models')), cache_enabled: mode === 'off' ? 0 : 1, cache_mode: mode === 'off' ? 'auto' : mode, cache_ttl: segValue('c-ttl'), cache_rules: JSON.stringify(['rules', 'client'].includes(mode) ? getRules('c-rules') : []), or_routing: isChecked('c-or'), or_providers: val('c-providers').trim(), thinking_alias: isChecked('c-thinking'), proxy_url: val('c-proxy').trim()};
     const nameError = channelNameError(payload.name);
     if (nameError) { $('#c-name').focus(); throw new Error(`渠道名称：${nameError}`); }
     if (!payload.base_url || !payload.api_key) throw new Error('请填写上游地址和 API Key');

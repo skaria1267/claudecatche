@@ -27,6 +27,8 @@ def _apply_cache_inject(body: dict, channel: dict) -> dict:
     if int(channel.get("cache_enabled", 1) or 0) != 1:
         return body
     mode = channel.get("cache_mode") or "auto"
+    if mode == "client":
+        return body
     ttl = channel.get("cache_ttl") or "5m"
     try:
         rules = json.loads(channel.get("cache_rules") or "[]")

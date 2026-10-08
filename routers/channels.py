@@ -78,6 +78,8 @@ def _validate_proxy(url: str):
 def _sanitize(data: dict):
     if "auth_mode" in data and data["auth_mode"] not in ("x", "a", "both"):
         raise HTTPException(status_code=400, detail="auth_mode 必须是 x / a / both")
+    if "cache_mode" in data and data["cache_mode"] not in ("auto", "rules", "client"):
+        raise HTTPException(status_code=400, detail="缓存模式必须是 auto / rules / client")
     if "name" in data and data["name"] is not None:
         if not _NAME_RE.match(data["name"]):
             raise HTTPException(status_code=400, detail="渠道名只能包含字母、数字、下划线、连字符")
