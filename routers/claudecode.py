@@ -1,15 +1,18 @@
+import asyncio
 import json
 import time
 from collections import defaultdict, deque
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from models import get_setting, set_setting
 from routers.auth import verify_token
 from services.usage_filters import usage_period
 from services import claudecode_store, claudecode_client
+from services import claudecode_resets
+from services import claudecode_auth
 from services.claudecode_auth import CLAUDE_BASE, account_info, account_usage, valid_token
 from services.claudecode_request_builder import client_models, prepare
 from services.claudecode_upstream import clear_failures, failures, forward, request_headers
@@ -28,6 +31,7 @@ SETTING_KEYS = {
 }
 _account_index = 0
 _request_times: dict[int, deque] = defaultdict(deque)
+_reset_locks: dict[int, asyncio.Lock] = {}
 
 
 async def _admin(authorization: str | None) -> None:
@@ -52,7 +56,8 @@ def _proxy(value: str) -> str:
 
 class AccountCreate(BaseModel):
     name: str
-    credential: str
+    credential: str = ""
+    auth_method: str = Field(default="session", pattern=r"^(session|oauth)$")
     proxy_url: str = ""
 
 
@@ -78,6 +83,16 @@ class ConfigUpdate(BaseModel):
 class VersionChange(BaseModel):
     version: str
     expected_version: str
+
+
+class ResetCreditConsume(BaseModel):
+    credit_id: str = Field(pattern=r"^[a-z0-9_-]{1,40}$")
+    credit_version: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class AuthcodeComplete(BaseModel):
+    login_session_id: str = Field(min_length=1, max_length=128)
+    code: str = Field(min_length=1, max_length=8192)
 
 
 class VersionProbe(VersionChange):
@@ -223,10 +238,11 @@ async def create_account(req: AccountCreate, authorization: str = Header(None)):
     await _admin(authorization)
     if not secret_store_configured():
         raise HTTPException(status_code=400, detail="请先配置 CATCH_MASTER_KEY")
-    if not req.credential.strip():
+    if req.auth_method == "session" and not req.credential.strip():
         raise HTTPException(status_code=400, detail="请填写 Claude sessionKey")
     account_id = await claudecode_store.add_account(
-        req.name.strip() or "Claude Code", req.credential.strip(), _proxy(req.proxy_url)
+        req.name.strip() or "Claude Code",
+        req.credential.strip() if req.auth_method == "session" else "", _proxy(req.proxy_url)
     )
     return {"ok": True, "id": account_id}
 
@@ -237,20 +253,26 @@ async def patch_account(account_id: int, req: AccountUpdate,
     await _admin(authorization)
     updates = req.model_dump(exclude_none=True)
     credential = updates.pop("credential", None)
-    if credential is not None:
-        if not credential.strip():
-            raise HTTPException(status_code=400, detail="sessionKey 不能为空")
-        await claudecode_store.replace_credential(account_id, credential.strip())
+    if credential is not None and not credential.strip():
+        raise HTTPException(status_code=400, detail="sessionKey 不能为空")
     if "proxy_url" in updates:
         updates["proxy_url"] = _proxy(updates["proxy_url"])
-    await claudecode_store.update_account(account_id, **updates)
+    async with claudecode_auth.account_lock(account_id):
+        if not await claudecode_store.get_account(account_id):
+            raise HTTPException(status_code=404, detail="账号不存在")
+        if credential is not None:
+            await claudecode_store.replace_credential(account_id, credential.strip())
+            claudecode_auth.invalidate_account(account_id)
+        await claudecode_store.update_account(account_id, **updates)
     return {"ok": True}
 
 
 @router.delete("/api/claudecode/accounts/{account_id}")
 async def delete_account(account_id: int, authorization: str = Header(None)):
     await _admin(authorization)
-    await claudecode_store.delete_account(account_id)
+    async with claudecode_auth.account_lock(account_id):
+        await claudecode_store.delete_account(account_id)
+        claudecode_auth.invalidate_account(account_id)
     return {"ok": True}
 
 
@@ -273,6 +295,61 @@ async def refresh_usage(account_id: int, authorization: str = Header(None)):
         return await account_usage(account_id)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/api/claudecode/accounts/{account_id}/authcode/start")
+async def start_authcode(account_id: int, authorization: str = Header(None)):
+    await _admin(authorization)
+    if not secret_store_configured():
+        raise HTTPException(status_code=400, detail="请先配置 CATCH_MASTER_KEY")
+    if not await claudecode_store.get_account(account_id):
+        raise HTTPException(status_code=404, detail="账号不存在")
+    return await claudecode_auth.authcode_start(account_id)
+
+
+@router.post("/api/claudecode/accounts/{account_id}/authcode/complete")
+async def complete_authcode(account_id: int, req: AuthcodeComplete,
+                            authorization: str = Header(None)):
+    await _admin(authorization)
+    if not secret_store_configured():
+        raise HTTPException(status_code=400, detail="请先配置 CATCH_MASTER_KEY")
+    try:
+        return await claudecode_auth.authcode_complete(account_id, req.login_session_id, req.code)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="授权未完成，请检查账号代理并重新登录") from exc
+
+
+@router.get("/api/claudecode/accounts/{account_id}/reset-credits")
+async def reset_credits(account_id: int, authorization: str = Header(None)):
+    await _admin(authorization)
+    if not await claudecode_store.get_account(account_id):
+        raise HTTPException(status_code=404, detail="账号不存在")
+    try:
+        return await claudecode_resets.fetch_reset_credits(account_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="重置卡查询失败，请检查账号登录状态与代理") from exc
+
+
+@router.post("/api/claudecode/accounts/{account_id}/reset-credits/consume")
+async def use_reset_credit(account_id: int, req: ResetCreditConsume,
+                           authorization: str = Header(None)):
+    await _admin(authorization)
+    if not await claudecode_store.get_account(account_id):
+        raise HTTPException(status_code=404, detail="账号不存在")
+    lock = _reset_locks.setdefault(account_id, asyncio.Lock())
+    async with lock:
+        try:
+            return await claudecode_resets.consume_reset_credit(account_id, req.credit_id, req.credit_version)
+        except claudecode_resets.ResetCreditConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail="未确认重置结果，请先刷新卡片与用量；请勿连续点击使用") from exc
 
 
 @router.get("/api/claudecode/logs")
@@ -330,7 +407,8 @@ def _rpm_allowed(account_id: int, limit: int) -> bool:
 async def _ordered_accounts() -> list[dict]:
     global _account_index
     items = [item for item in await claudecode_store.list_accounts(public=False)
-             if int(item.get("is_active", 0)) == 1]
+             if int(item.get("is_active", 0)) == 1
+             and (item.get("credential_secret") or item.get("access_secret") or item.get("refresh_secret"))]
     if not items:
         return []
     start = _account_index % len(items)

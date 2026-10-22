@@ -20,6 +20,8 @@ def _public(row: dict) -> dict:
     result["credential_configured"] = bool(
         row.get("credential_secret") or row.get("access_secret") or row.get("refresh_secret")
     )
+    result["session_key_configured"] = bool(row.get("credential_secret"))
+    result["auth_method"] = "session" if result["session_key_configured"] else "oauth"
     try:
         result["usage"] = json.loads(row.get("last_usage_json") or "{}")
     except ValueError:
@@ -63,6 +65,11 @@ async def get_account(account_id: int, decrypt: bool = False) -> dict | None:
     return result
 
 
+async def get_public_account(account_id: int) -> dict | None:
+    account = await get_account(account_id)
+    return _public(account) if account else None
+
+
 async def update_account(account_id: int, **updates) -> None:
     allowed = {
         "name", "email", "subscription_type", "organization_id", "proxy_url",
@@ -86,7 +93,9 @@ async def replace_credential(account_id: int, credential: str) -> None:
         await db.execute(
             """UPDATE claudecode_accounts
                SET credential_secret = ?, access_secret = '', refresh_secret = '',
-                   token_expires_at = 0, disable_reason = '' WHERE id = ?""",
+                   token_expires_at = 0, disable_reason = '', email = '',
+                   organization_id = '', subscription_type = '', last_usage_json = '{}',
+                   usage_refreshed_at = 0 WHERE id = ?""",
             (seal(credential), account_id),
         )
         await db.commit()
@@ -101,6 +110,21 @@ async def save_token(account_id: int, access_token: str, refresh_token: str, exp
                    organization_id = COALESCE(NULLIF(?, ''), organization_id), disable_reason = ''
                WHERE id = ?""",
             (seal(access_token), seal(refresh_token), expires_at, organization_id, account_id),
+        )
+        await db.commit()
+
+
+async def save_oauth_login(account_id: int, access_token: str, refresh_token: str,
+                           expires_at: int, info: dict) -> None:
+    async with get_db() as db:
+        await db.execute(
+            """UPDATE claudecode_accounts SET credential_secret = '', access_secret = ?,
+               refresh_secret = ?, token_expires_at = ?, organization_id = ?, email = ?,
+               subscription_type = ?, disable_reason = '', last_usage_json = '{}',
+               usage_refreshed_at = 0 WHERE id = ?""",
+            (seal(access_token), seal(refresh_token), expires_at,
+             info.get("organization_id", ""), info.get("email", ""),
+             info.get("subscription_type", ""), account_id),
         )
         await db.commit()
 

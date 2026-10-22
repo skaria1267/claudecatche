@@ -177,20 +177,55 @@ export function bindProxyTest(id, targetUrl) {
 }
 
 // 订阅额度：把 Codex 与 Claude Code 两种用量结构统一为窗口列表。
-const usageLabels = {five_hour: '5 小时', five_hour_opus: '5 小时 Opus', seven_day: '每周', seven_day_opus: 'Opus 每周', seven_day_sonnet: 'Sonnet 每周', seven_day_total: '每周总计'};
+const usageLabels = {five_hour: '5 小时', five_hour_opus: '5 小时 Opus', seven_day: '每周', seven_day_opus: 'Opus 每周', seven_day_sonnet: 'Sonnet 每周', seven_day_fable: 'Fable 每周', seven_day_fableonly: 'Fable Only 每周', seven_day_total: '每周总计', seven_day_overage_included: '每周附加额度'};
+const usageNumber = value => (typeof value === 'number' || (typeof value === 'string' && value.trim())) && Number.isFinite(Number(value)) ? Number(value) : null;
+const usageKey = value => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
 export function quotaWindows(usage) {
   const windows = []; const rate = usage?.rate_limit || {};
   // Both upstream fields are percentages, including values between 0 and 1.
-  const push = (name, w) => { const used = Number(w.used_percent ?? w.utilization ?? 0); windows.push({name, pct: Number.isFinite(used) ? used : 0, reset: w.reset_at ?? w.resets_at}); };
+  const push = (name, w) => {
+    if (!w || typeof w !== 'object') return;
+    windows.push({name, pct: usageNumber(w.used_percent ?? w.utilization ?? w.percent ?? w.used_percentage), reset: w.reset_at ?? w.resets_at});
+  };
   if (rate.primary_window) push('5 小时', rate.primary_window);
   if (rate.secondary_window) push('每周', rate.secondary_window);
-  (usage?.additional_rate_limits || []).forEach(x => { const name = x.limit_name || x.metered_feature || '独立窗口'; if (x.rate_limit?.primary_window) push(name, x.rate_limit.primary_window); if (x.rate_limit?.secondary_window) push(`${name} 每周`, x.rate_limit.secondary_window); });
-  if (!windows.length && usage && typeof usage === 'object') for (const [key, value] of Object.entries(usage)) if (value && typeof value === 'object' && ('utilization' in value || 'used_percent' in value)) push(usageLabels[key] || key, value);
+  (Array.isArray(usage?.additional_rate_limits) ? usage.additional_rate_limits : []).forEach(x => { const name = x.limit_name || x.metered_feature || '独立窗口'; if (x.rate_limit?.primary_window) push(name, x.rate_limit.primary_window); if (x.rate_limit?.secondary_window) push(`${name} 每周`, x.rate_limit.secondary_window); });
+  if (windows.length || !usage || typeof usage !== 'object') return windows;
+  const seen = new Set();
+  // New Claude responses enumerate scoped limits here; keep unknown kinds too.
+  for (const limit of Array.isArray(usage.limits) ? usage.limits : []) {
+    if (!limit || typeof limit !== 'object') continue;
+    const kind = String(limit.kind || '');
+    const scope = limit.scope || {};
+    const model = typeof scope.model === 'string' ? scope.model : scope.model?.display_name || scope.model?.id || '';
+    const surface = typeof scope.surface === 'string' ? scope.surface : scope.surface?.display_name || scope.surface?.id || '';
+    const scopeName = [model, surface].filter(Boolean).join(' · ');
+    const aliases = [];
+    let name = limit.display_name || limit.label || limit.name || kind || `窗口 ${windows.length + 1}`;
+    if (kind === 'session') {
+      name = scopeName ? `${scopeName} 会话窗口` : '5 小时';
+      if (!scopeName) aliases.push('five_hour');
+    } else if (kind === 'weekly_all') { name = '每周'; aliases.push('seven_day'); }
+    else if (kind === 'weekly_scoped' && scopeName) {
+      name = `${scopeName} 每周`;
+      aliases.push(`seven_day_${usageKey(scopeName)}`);
+      if (model && !surface && scope.model?.id) aliases.push(`seven_day_${usageKey(scope.model.id)}`);
+    } else if (scopeName) name = `${scopeName} · ${name}`;
+    push(String(name), limit);
+    aliases.forEach(key => seen.add(key));
+  }
+  for (const [key, value] of Object.entries(usage)) {
+    if (seen.has(usageKey(key)) || key === 'extra_usage' || !value || typeof value !== 'object' || Array.isArray(value)) continue;
+    if (['utilization', 'used_percent', 'percent', 'used_percentage'].some(field => field in value)) push(usageLabels[key] || key, value);
+  }
+  const extra = usage.extra_usage;
+  if (extra && extra.is_enabled === true && usageNumber(extra.utilization) !== null) push('额外用量', extra);
   return windows;
 }
 const resetStamp = reset => {
   if (!reset) return 0;
-  const ts = typeof reset === 'number' ? reset : Date.parse(reset) / 1000;
+  const numeric = usageNumber(reset);
+  const ts = numeric !== null ? (numeric > 1e12 ? numeric / 1000 : numeric) : Date.parse(reset) / 1000;
   return Number.isFinite(ts) ? ts : 0;
 };
 const resetText = reset => {
@@ -224,9 +259,26 @@ export function quotaBars(usage, {compact = false} = {}) {
   const extra = [];
   if (credits) extra.push(`<span class="meta-item">Credits ${credits.unlimited ? '无限' : esc(credits.balance ?? (credits.has_credits ? '可用' : '—'))}</span>`);
   if (usage?.rate_limit_reset_credits?.available_count != null) extra.push(`<span class="meta-item">窗口重置券 ${fmt(usage.rate_limit_reset_credits.available_count)}</span>`);
-  if (!windows.length) return `<p class="hint">${compact ? '尚未获取额度' : '还没有额度数据，点击「刷新用量」获取。'}</p>${extra.length ? `<div class="meta-line">${extra.join('')}</div>` : ''}`;
+  if (usage?.extra_usage) {
+    const e = usage.extra_usage;
+    extra.push(`<span class="meta-item">额外用量：${e.is_enabled === true ? '已启用' : e.is_enabled === false ? '未启用' : '状态未返回'}</span>`);
+    if (e.is_enabled === true) {
+      const currency = e.currency || 'USD';
+      const money = n => `${(n / 100).toFixed(2)} ${currency}`;
+      if (usageNumber(e.used_credits) !== null) extra.push(`<span class="meta-item">已用 ${esc(money(Number(e.used_credits)))}</span>`);
+      if (usageNumber(e.monthly_limit) !== null) extra.push(`<span class="meta-item">月上限 ${esc(money(Number(e.monthly_limit)))}</span>`);
+    }
+  }
+  const raw = !compact && usage && Object.keys(usage).length ? `<details class="usage-raw"><summary>上游用量原始数据</summary><pre>${esc(JSON.stringify(usage, null, 2))}</pre></details>` : '';
+  if (!windows.length) return `<p class="hint">${compact ? '尚未获取额度' : '暂未返回可显示的额度窗口。'}</p>${extra.length ? `<div class="meta-line">${extra.join('')}</div>` : ''}${raw}`;
   // 精简模式把重置时间放在窗口名后面，账号列表里也能看到什么时候恢复。
-  return `<div class="quota ${compact ? 'compact' : ''}">${windows.map(w => { const pct = Math.max(0, Math.min(100, w.pct)); const reset = resetLabel(w.reset); return `<div class="quota-row"><div class="quota-label"><span>${esc(w.name)}${compact && reset ? `<small class="quota-reset"> · ${reset}</small>` : ''}</span><span class="quota-num ${quotaTone(pct)}">${pct.toFixed(compact ? 0 : 1)}%</span></div><div class="bar"><i class="${quotaTone(pct)}" style="width:${pct}%"></i></div>${compact ? '' : `<small class="hint">${reset || (w.reset ? esc('重置于 ' + date(w.reset)) : '')}</small>`}</div>`; }).join('')}</div>${extra.length ? `<div class="meta-line">${extra.join('')}</div>` : ''}`;
+  return `<div class="quota ${compact ? 'compact' : ''}">${windows.map(w => {
+    const known = w.pct !== null; const pct = known ? Math.max(0, Math.min(100, w.pct)) : 0;
+    const reset = resetLabel(w.reset); const stamp = resetStamp(w.reset);
+    return `<div class="quota-row"><div class="quota-label"><span>${esc(w.name)}${compact && reset ? `<small class="quota-reset"> · ${reset}</small>` : ''}</span><span class="quota-num ${quotaTone(pct)}">${known ? `${w.pct.toFixed(compact && Number.isInteger(w.pct) ? 0 : 1)}%` : '未返回'}</span></div>
+      <div class="bar ${known ? '' : 'unknown'}" role="progressbar" aria-label="${esc(w.name)} 已用比例" aria-valuemin="0" aria-valuemax="100" ${known ? `aria-valuenow="${pct}"` : 'aria-valuetext="上游未返回百分比"'}><i class="${quotaTone(pct)}" style="width:${pct}%"></i></div>
+      ${compact ? '' : `<small class="hint">${stamp ? `${esc(date(stamp))} · ${reset}` : '上游未注明重置时间'}</small>`}</div>`;
+  }).join('')}</div>${extra.length ? `<div class="meta-line">${extra.join('')}</div>` : ''}${raw}`;
 }
 
 // 未保存修改提示栏：对比表单快照，有差异时出现在底部。

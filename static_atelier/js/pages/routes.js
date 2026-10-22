@@ -316,7 +316,7 @@ function renderAccounts(ctx, kind, accounts) {
   if (!root) return;
   paintSubState(kind, accounts);
   if (!accounts.length) {
-    root.innerHTML = empty('user', '还没有账号', kind === 'codex' ? '添加账号后，用 OpenAI 账号登录授权即可开始转发。' : '添加账号时需要填写 Claude 网页版的 sessionKey。', `<button class="btn primary" type="button" data-new>${icon('plus')}添加第一个账号</button>`);
+    root.innerHTML = empty('user', '还没有账号', kind === 'codex' ? '添加账号后，用 OpenAI 账号登录授权即可开始转发。' : '可使用浏览器 OAuth 或 Claude sessionKey 登录。', `<button class="btn primary" type="button" data-new>${icon('plus')}添加第一个账号</button>`);
     $('[data-new]', root).onclick = () => accountSheet(ctx, kind, null);
     return;
   }
@@ -325,10 +325,10 @@ function renderAccounts(ctx, kind, accounts) {
     const state = !ready ? pill('warn', kind === 'codex' ? '未授权' : '未录入凭据') : on(a.is_active) ? pill('ok', '可用') : pill('idle', '停用');
     return `<article class="item account" data-id="${a.id}" tabindex="0">
       <div class="item-main"><div class="item-title"><strong>${esc(a.name)}</strong>${state}</div>
-        <p class="item-sub">${[a.email, a.subscription_type || (ready ? '套餐待识别' : ''), a.proxy_url ? '独立代理' : '直连'].filter(Boolean).map(esc).join(' · ')}</p>
+        <p class="item-sub">${[a.email, a.subscription_type || (ready ? '套餐待识别' : ''), kind === 'claudecode' ? (a.auth_method === 'oauth' ? 'OAuth' : 'sessionKey') : '', a.proxy_url ? '独立代理' : '直连'].filter(Boolean).map(esc).join(' · ')}</p>
         ${a.disable_reason ? `<p class="item-warn">${icon('alert')}${esc(a.disable_reason)}</p>` : ''}
         ${quotaWindows(a.usage).length ? `${quotaBars(a.usage, {compact: true})}${a.usage_refreshed_at ? `<p class="hint">用量更新于 ${agoLabel(a.usage_refreshed_at)}</p>` : ''}` : ''}
-        ${!ready ? `<button class="btn small primary" type="button" data-stop data-auth="${a.id}">${kind === 'codex' ? '去授权' : '填写 sessionKey'}${icon('arrow')}</button>` : ''}</div>
+        ${!ready ? `<button class="btn small primary" type="button" data-stop data-auth="${a.id}">去授权${icon('arrow')}</button>` : ''}</div>
       <div class="item-side" data-stop><button class="icon-btn ghost" type="button" data-refresh="${a.id}" aria-label="刷新用量" title="刷新用量" ${ready ? '' : 'disabled'}>${icon('refresh')}</button>${switchControl(`acc-on-${a.id}`, on(a.is_active), `启用 ${a.name}`)}</div>
       <span class="item-chevron">${icon('chevron')}</span></article>`;
   }).join('');
@@ -361,11 +361,19 @@ async function accountSheet(ctx, kind, account, {focusAuth = false, justCreated 
   const ready = id && accountReady(kind, account);
   let stopPoll = null;
   const steps = !id || justCreated ? `<ol class="stepper"><li class="${id ? 'done' : 'active'}">${id ? icon('check') : '<b>1</b>'}<span>账号信息</span></li><li class="${id ? 'active' : ''}"><b>2</b><span>${isCC ? '验证登录' : '授权登录'}</span></li></ol>` : '';
-  // Claude Code 未就绪说明缺 sessionKey，应去账号设置填写；其余未就绪或刚创建时先看授权。
-  const firstPane = !id ? 'settings' : isCC ? (justCreated ? 'auth' : !ready ? 'settings' : 'usage') : (justCreated || focusAuth || !ready ? 'auth' : 'usage');
-  const authLabel = isCC ? '验证登录' : ready ? '重新授权' : '授权登录';
+  const firstPane = !id ? 'settings' : justCreated || focusAuth || !ready ? 'auth' : 'usage';
+  const authLabel = ready ? '重新授权' : '授权登录';
   const authBlock = !id ? '' : isCC
-    ? `<section class="form-section auth-section"><p class="hint">用已保存的 sessionKey 登录 Claude，读取账号信息和额度。更换 sessionKey 请到「账号设置」。</p><div class="row-actions"><button class="btn primary" type="button" id="sa-auth">${icon('shield')}验证并登录</button></div><div class="hint" id="sa-auth-state"></div></section>`
+    ? `<section class="form-section auth-section">
+        ${field('登录方式', segmented('sa-cc-mode', [['oauth', '浏览器 OAuth'], ['session', 'sessionKey']], account.auth_method || 'session', {small: true}))}
+        <div id="sa-cc-oauth"><button class="btn primary" type="button" id="sa-cc-browser">${icon('globe')}打开 Claude 登录</button>
+          <div id="sa-cc-fields" hidden>${field('授权码或回调地址', '<textarea id="sa-cc-code" rows="3" autocomplete="off" spellcheck="false" placeholder="粘贴 Claude 授权页复制的完整代码"></textarea>')}
+            <button class="btn primary" type="button" id="sa-cc-complete">${icon('check')}完成授权</button></div>
+        </div>
+        <div id="sa-cc-session"><p class="hint">${account.session_key_configured ? '使用已保存的 sessionKey 登录。' : '尚未填写 sessionKey。'}</p>
+          <button class="btn" type="button" id="sa-cc-settings">${icon('settings')}填写或更换 sessionKey</button></div>
+        <div class="row-actions"><button class="btn" type="button" id="sa-auth" ${ready ? '' : 'disabled'}>${icon('shield')}验证当前登录</button></div>
+        <div class="auth-state" id="sa-auth-state"></div></section>`
     : `<section class="form-section auth-section" id="sa-auth-section">
         ${field('授权方式', segmented('sa-auth-mode', [['callback', '浏览器登录'], ['device', '设备代码']], 'callback', {small: true}))}
         <div id="sa-callback"><ol class="mini-steps"><li>点击下方按钮，在新窗口登录 OpenAI。</li><li>登录后页面会打不开，这是正常的。复制浏览器地址栏里的完整地址。</li><li>粘贴到下面的输入框，点「完成授权」。</li></ol>
@@ -377,14 +385,15 @@ async function accountSheet(ctx, kind, account, {focusAuth = false, justCreated 
         <div id="sa-usage">${quotaBars(account.usage)}</div>${account.usage_refreshed_at ? `<p class="hint">更新于 ${date(account.usage_refreshed_at)}（${agoLabel(account.usage_refreshed_at)}）</p>` : ''}
         <div class="row-actions"><button class="btn small" type="button" id="sa-refresh" ${ready ? '' : 'disabled'}>${icon('refresh')}刷新用量</button>${kind === 'codex' ? `<button class="btn small" type="button" id="sa-models" ${ready ? '' : 'disabled'}>${icon('download')}拉取可用模型</button>` : ''}<span class="hint" id="sa-usage-state"></span></div>
         ${kind === 'codex' ? `<div id="sa-model-list">${modelChips(account.models)}</div>` : ''}</section>
-      ${kind === 'codex' ? `<section class="form-section"><h4>重置卡</h4><div id="sa-reset-credits"><p class="hint">${ready ? '尚未查询' : '授权后可查询'}</p></div>
-        <div class="row-actions"><button class="btn small" type="button" id="sa-reset-refresh" ${ready ? '' : 'disabled'}>${icon('refresh')}查看重置卡</button><span class="hint" id="sa-reset-state"></span></div></section>` : ''}`;
+      <section class="form-section"><h4>重置卡</h4><div id="sa-reset-credits"><p class="hint">${ready ? '尚未查询' : '登录后可查询'}</p></div>
+        <div class="row-actions"><button class="btn small" type="button" id="sa-reset-refresh" ${ready ? '' : 'disabled'}>${icon('refresh')}查看重置卡</button><span class="hint" id="sa-reset-state"></span></div></section>`;
   const settingsPane = `<section class="form-section">
         ${id ? `<div data-no-dirty>${toggleRow('sa-active', '启用账号', '开关立即生效。停用后不再把请求分配给这个账号。', on(account.is_active))}</div>` : ''}
         ${id && account.disable_reason ? `<div class="notice">${icon('alert')}<div><strong>停用原因</strong><p>${esc(account.disable_reason)}。重新启用会清除该原因。</p></div></div>` : ''}
         ${field('名称', `<input id="sa-name" value="${esc(account?.name || meta.title)}" autocomplete="off">`, '仅用于在面板里区分账号。')}
         ${proxyInput('sa-proxy', account?.proxy_url, {hint: '这个代理只用于当前账号。支持 http / socks5 链接或 host:port:user:password，留空为直连。'})}
-        ${isCC ? field('Claude sessionKey', secretInput('sa-credential', '', id ? '留空则保持当前 sessionKey' : 'sk-ant-sid...'), '在浏览器登录 claude.ai 后，从 Cookie 中复制 sessionKey。') : ''}
+        ${isCC && !id ? field('登录方式', segmented('sa-create-auth', [['oauth', '浏览器 OAuth'], ['session', 'sessionKey']], 'oauth', {small: true})) : ''}
+        ${isCC ? `<div id="sa-credential-wrap" ${id ? '' : 'hidden'}>${field('Claude sessionKey', secretInput('sa-credential', '', id ? '留空保持当前登录，填写则切换到 sessionKey' : 'sk-ant-sid...'), '在浏览器登录 claude.ai 后，从 Cookie 中复制 sessionKey。')}</div>` : ''}
       </section>`;
   const tabs = id ? `<div class="sheet-tabs">${segmented('sa-pane', [['usage', '额度'], ['settings', '账号设置'], ['auth', authLabel]], firstPane)}</div>` : '';
   const sheet = openSheet(`${sheetHead(id ? `${meta.title} 账号` : `添加 ${meta.title} 账号`, id ? account.name : '新账号', steps + tabs)}
@@ -403,6 +412,7 @@ async function accountSheet(ctx, kind, account, {focusAuth = false, justCreated 
   if (id) bindSegmented('sa-pane', showPane);
   showPane(firstPane);
   bindReveal(sheet);
+  if (isCC && !id) bindSegmented('sa-create-auth', mode => { $('#sa-credential-wrap', sheet).hidden = mode !== 'session'; });
   bindProxyTest('sa-proxy', meta.proxyTarget);
   // 只刷新账号列表，避免丢掉其他标签里未保存的修改。
   const reloadView = async () => { const list = await refreshList(kind); if ($('#sub-accounts')) renderAccounts(ctx, kind, list); return list; };
@@ -411,7 +421,13 @@ async function accountSheet(ctx, kind, account, {focusAuth = false, justCreated 
     const name = val('sa-name').trim(); const proxy = val('sa-proxy').trim();
     if (!id) {
       const payload = {name, proxy_url: proxy};
-      if (isCC) { payload.credential = val('sa-credential').trim(); if (!payload.credential) throw new Error('请填写 Claude sessionKey'); }
+      if (isCC) {
+        payload.auth_method = segValue('sa-create-auth');
+        if (payload.auth_method === 'session') {
+          payload.credential = val('sa-credential').trim();
+          if (!payload.credential) throw new Error('请填写 Claude sessionKey');
+        }
+      }
       const created = await post(`/api/${kind}/accounts`, payload);
       const list = await reloadView();
       const fresh = list.find(x => x.id === created.id);
@@ -445,66 +461,170 @@ async function accountSheet(ctx, kind, account, {focusAuth = false, justCreated 
     $('#sa-model-list').innerHTML = modelChips(d.models);
     return `已拉取并保存 ${d.models.length} 个模型`;
   }, $('#sa-usage-state'));
-  if (kind === 'codex') {
-    const resetRoot = $('#sa-reset-credits');
-    const resetState = $('#sa-reset-state');
+  {
+    const resetRoot = $('#sa-reset-credits', sheet);
+    const resetState = $('#sa-reset-state', sheet);
+    const resetRefresh = $('#sa-reset-refresh', sheet);
+    let resetBusy = false;
+    const windowNames = {five_hour: '5 小时窗口', seven_day: '每周窗口', seven_day_opus: 'Opus 每周窗口', seven_day_sonnet: 'Sonnet 每周窗口', seven_day_overage_included: '每周附加额度窗口'};
+    const expiryTime = value => {
+      const time = Date.parse(value || '');
+      return Number.isFinite(time) ? time : Infinity;
+    };
+    const formatCreditDate = value => expiryTime(value) !== Infinity
+      ? new Date(value).toLocaleString('zh-CN', {hour12: false}) : '未注明';
+    const disableCredits = () => $$('[data-credit]', resetRoot).forEach(button => button.disabled = true);
     const loadResetCredits = async () => {
-      const data = await api(`/api/codex/accounts/${id}/reset-credits`);
-      const expiryTime = value => {
-        const time = Date.parse(value || '');
-        return Number.isFinite(time) ? time : Infinity;
-      };
-      const available = (data.credits || []).filter(c => c.reset_type === 'codex_rate_limits' && c.status === 'available' && c.id)
-        .sort((a, b) => expiryTime(a.expires_at) - expiryTime(b.expires_at));
-      resetRoot.innerHTML = available.length ? `<div class="reset-credit-list">${available.map(c =>
-        `<div class="reset-credit-row"><div><strong>${esc(c.title || '完整重置')}</strong><p class="hint">${expiryTime(c.expires_at) !== Infinity ? `有效期至 ${esc(new Date(c.expires_at).toLocaleString('zh-CN', {hour12: false}))}` : '未注明到期时间'}</p></div>
-          <button class="btn small" type="button" data-credit="${esc(c.id)}">使用</button></div>`).join('')}</div>` : '<p class="hint">暂无可用重置卡</p>';
+      disableCredits();
+      const data = await api(`/api/${kind}/accounts/${id}/reset-credits`);
+      if (!sheet.isConnected) return data;
+      const available = (data.credits || []).filter(c => c.id && (isCC || (c.reset_type === 'codex_rate_limits' && c.status === 'available')))
+        .sort((a, b) => {
+          const finished = c => isCC && (c.status === 'expired' || c.status === 'redeemed');
+          return Number(finished(a)) - Number(finished(b)) || expiryTime(a.expires_at) - expiryTime(b.expires_at);
+        });
+      const canUse = c => (!isCC || c.usable === true) && expiryTime(c.expires_at) > Date.now();
+      let note = '';
+      if (isCC) {
+        if (!data.supported) note = '当前接口未返回保存型重置卡信息，无法确认是否有卡。';
+        else if (data.reason === 'surface') note = '上游限制了当前客户端的重置卡访问，请在 Claude 网页用量页查看或使用。';
+        else if (data.reason === 'cli_version') note = '客户端版本过旧，请在 Claude Code 设置中获取并应用最新版本后重新查询。';
+        else if (!data.eligible) note = `账号当前不符合重置条件${data.reason ? `（${data.reason}）` : ''}。`;
+      }
+      const notice = note ? `<p class="hint">${esc(note)} <a href="https://claude.ai/settings/usage" target="_blank" rel="noopener noreferrer">打开 Claude 用量页</a></p>` : '';
+      resetRoot.innerHTML = notice + (available.length ? `<div class="reset-credit-list">${available.map(c =>
+        `<div class="reset-credit-row"><div><strong>${esc(c.title || '完整重置')}</strong>
+          ${isCC ? `<p class="hint">${esc(c.status_text)} · 剩余 ${fmt(c.remaining_count)} 次</p><p class="hint">生效时间：${esc(formatCreditDate(c.granted_at))}</p>` : ''}
+          <p class="hint">有效期至：${esc(formatCreditDate(c.expires_at))}</p>
+          ${isCC && c.clears?.length ? `<p class="hint">重置范围：${esc(c.clears.map(x => windowNames[x] || x).join('、'))}</p>` : ''}</div>
+          <button class="btn small" type="button" data-credit="${esc(c.id)}" ${canUse(c) ? '' : 'disabled'}>${icon('refresh')}使用</button></div>`).join('')}</div>` : (note ? '' : '<p class="hint">暂无可用重置卡</p>'))
+        + (isCC && data.cooldown_until ? `<p class="hint">冷却结束：${esc(formatCreditDate(data.cooldown_until))}</p>` : '')
+        + (isCC && data.queried_at ? `<p class="hint">查询时间：${date(data.queried_at)}</p>` : '');
       $$('[data-credit]', resetRoot).forEach(button => button.onclick = async () => {
         const credit = available.find(c => c.id === button.dataset.credit);
-        if (!credit) return;
-        const expiry = expiryTime(credit.expires_at) !== Infinity
-          ? new Date(credit.expires_at).toLocaleString('zh-CN', {hour12: false}) : '未注明';
-        const confirmed = await confirmDialog({title: `使用「${credit.title || '完整重置'}」？`,
-          message: `这张卡的到期时间：${expiry}。将重置「${account.name}」的 Codex 用量窗口，并可能改变每周重置日期。此操作不能撤销。`,
-          confirmText: '确认使用', danger: true});
-        if (!confirmed) return;
-        await busy(button, async () => {
-          await post(`/api/codex/accounts/${id}/reset-credits/consume`, {credit_id: credit.id});
-          resetRoot.innerHTML = '<p class="hint">正在更新重置卡和用量…</p>';
-          let refreshed = true;
-          try {
-            const usage = await post(`/api/codex/accounts/${id}/usage`);
-            account.usage = usage;
-            $('#sa-usage').innerHTML = quotaBars(usage);
-          } catch (_) { refreshed = false; }
-          try { await loadResetCredits(); } catch (_) { refreshed = false; }
-          reloadView().catch(() => {});
-          return refreshed ? '重置卡已使用，用量已刷新' : '重置卡已使用；部分状态刷新失败，请稍后手动刷新';
-        }, resetState);
+        if (resetBusy || !credit || !canUse(credit)) return;
+        resetBusy = true;
+        resetRefresh.disabled = true;
+        try {
+          const scope = isCC ? (credit.clears || []).map(x => windowNames[x] || x).join('、') || '上游指定的用量窗口' : 'Codex 用量窗口，并可能改变每周重置日期';
+          const confirmed = await confirmDialog({title: `使用「${credit.title || '完整重置'}」？`,
+            message: `这张卡的到期时间：${formatCreditDate(credit.expires_at)}。将消耗一次重置机会，重置「${account.name}」的${scope}。此操作不能撤销。`,
+            confirmText: '确认使用', danger: true});
+          if (!confirmed || !sheet.isConnected) return;
+          disableCredits();
+          await busy(button, async () => {
+            const payload = {credit_id: credit.id};
+            if (isCC) payload.credit_version = credit.credit_version;
+            try {
+              await post(`/api/${kind}/accounts/${id}/reset-credits/consume`, payload);
+            } catch (error) {
+              resetRoot.innerHTML = '<p class="hint">使用结果未确认，请重新查询卡片并刷新用量后再操作。</p>';
+              throw error;
+            }
+            resetRoot.innerHTML = '<p class="hint">正在更新重置卡和用量…</p>';
+            let refreshed = true;
+            try {
+              const usage = await post(`/api/${kind}/accounts/${id}/usage`);
+              account.usage = usage;
+              const usageRoot = $('#sa-usage', sheet);
+              if (usageRoot) usageRoot.innerHTML = quotaBars(usage);
+            } catch (_) { refreshed = false; }
+            try { await loadResetCredits(); } catch (_) {
+              refreshed = false;
+              resetRoot.innerHTML = '<p class="hint">重置已处理，卡片刷新失败，请重新查询。</p>';
+            }
+            reloadView().catch(() => {});
+            return refreshed ? '重置卡已使用，用量已刷新' : '重置卡已使用；部分状态刷新失败，请稍后手动刷新';
+          }, resetState);
+        } finally { resetBusy = false; resetRefresh.disabled = !ready; }
       });
       return data;
     };
-    $('#sa-reset-refresh').onclick = e => busy(e.currentTarget, async () => {
-      const data = await loadResetCredits();
-      return `可用重置卡 ${data.available_count} 张`;
-    }, resetState);
+    resetRefresh.onclick = async e => {
+      if (resetBusy) return;
+      resetBusy = true;
+      try {
+        await busy(e.currentTarget, async () => {
+          const data = await loadResetCredits();
+          return isCC ? (data.supported && !['surface', 'cli_version'].includes(data.reason) ? `持有 ${data.available_count} 次，当前可用 ${data.redeemable_count} 次` : '未确认卡片状态') : `可用重置卡 ${data.available_count} 张`;
+        }, resetState);
+      } finally { resetBusy = false; }
+    };
   }
 
   const authDone = async (message, fresh) => {
     stopPoll?.();
     toast(message);
     const list = await reloadView();
+    if (!sheet.isConnected) return;
     const latest = fresh || list.find(x => x.id === id);
     if (latest) { accountSheet(ctx, kind, latest); $('#sa-usage-state').className = 'hint ok'; $('#sa-usage-state').textContent = message; }
   };
 
   if (isCC) {
+    const state = $('#sa-auth-state', sheet);
+    let session = null;
+    let authorizing = false;
+    const showMode = mode => {
+      $('#sa-cc-oauth', sheet).hidden = mode !== 'oauth';
+      $('#sa-cc-session', sheet).hidden = mode !== 'session';
+    };
+    bindSegmented('sa-cc-mode', showMode);
+    showMode(account.auth_method || 'session');
+    $('#sa-cc-settings', sheet).onclick = () => {
+      $(`[data-value="settings"]`, $('#sa-pane', sheet))?.click();
+      $('#sa-credential', sheet).focus();
+    };
+    const browserButton = $('#sa-cc-browser', sheet);
+    const completeButton = $('#sa-cc-complete', sheet);
+    browserButton.onclick = async () => {
+      if (authorizing) return;
+      authorizing = true;
+      const popup = window.open('about:blank', '_blank');
+      if (popup) popup.opener = null;
+      completeButton.disabled = true;
+      session = null;
+      $('#sa-cc-code', sheet).value = '';
+      try {
+        await busy(browserButton, async () => {
+          try {
+            const result = await post(`/api/claudecode/accounts/${id}/authcode/start`);
+            if (!sheet.isConnected) { popup?.close(); return ''; }
+            session = result;
+            if (popup) popup.location.replace(session.authorize_url);
+            $('#sa-cc-fields', sheet).hidden = false;
+            state.className = 'auth-state';
+            state.innerHTML = `<a href="${esc(session.authorize_url)}" target="_blank" rel="noopener noreferrer">打开 Claude 授权页</a><p class="hint">${Math.round(session.expires_in / 60)} 分钟内有效。授权后将页面给出的完整代码粘贴到上方。</p>`;
+            $('#sa-cc-code', sheet).focus();
+            return '';
+          } catch (error) { popup?.close(); throw error; }
+        }, state);
+      } finally { authorizing = false; completeButton.disabled = !session; }
+    };
+    completeButton.onclick = async () => {
+      if (authorizing || !session) return;
+      const code = $('#sa-cc-code', sheet).value.trim();
+      if (!code) { toast('请粘贴授权码或回调地址', true); return; }
+      authorizing = true;
+      browserButton.disabled = true;
+      try {
+        if (ready && !await confirmDialog({title: '替换当前登录？', message: `将以本次授权的 Claude 账号替换「${account.name}」的原有登录凭据与用量信息。`, confirmText: '确认替换'})) return;
+        if (!sheet.isConnected) return;
+        await busy(completeButton, async () => {
+          const current = session;
+          session = null;
+          const result = await post(`/api/claudecode/accounts/${id}/authcode/complete`, {login_session_id: current.login_session_id, code});
+          $('#sa-cc-code', sheet).value = '';
+          await authDone(`OAuth 授权成功${result.warnings?.length ? '；' + result.warnings.join('；') : '，账号与用量已更新'}`, result.account);
+          return '';
+        }, state);
+      } finally { authorizing = false; browserButton.disabled = false; completeButton.disabled = !session; }
+    };
     $('#sa-auth').onclick = e => busy(e.currentTarget, async () => {
       await post(`/api/claudecode/accounts/${id}/authenticate`);
       await authDone('验证成功，账号信息与额度已更新');
       return '';
     }, $('#sa-auth-state'));
-    if (focusAuth && !ready) $('#sa-credential').focus();
     return;
   }
 
